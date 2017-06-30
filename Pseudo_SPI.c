@@ -4,6 +4,8 @@
 
 #include "util.h"
 
+#include "Pseudo_SPI.h"
+
 void Pseudo_SCK_Strobe(BOOL Potentiometer_Number)
 {
 	if (!Potentiometer_Number) DDS1_POT_SCK = 1;

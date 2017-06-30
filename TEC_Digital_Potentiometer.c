@@ -56,6 +56,9 @@ return (SPI_Word_Backup);
 BOOL TEC_Power_Set(int Power) // TO CALIBRATE TO 8.19V, YOU SHOULD TYPE 819 
 {
 	unsigned char Digital_Potentiometer_Word = 0;
+	
+	if ((Power < TEC_Voltage_Low_Limit_Value) || (Power > TEC_Voltage_High_Limit_Value)) return (FALSE);
+	
 	PIC_SPI_Disable; // DISABLE SPI MOULE
 	Delay_0_625US(2); // delay 1.5 usec
 	tris_DSP_SPIB_MOSI = 0; 

@@ -13,19 +13,14 @@
  
 void InitTimer0INTMode(void)
  {
+  DDS1_PULSE_COUNTER_DISABLE;
   DDS1_RESET_PULSE_COUNTER;
  }
 
 void InitTimer1INTMode(void)
  {
+  DDS2_PULSE_COUNTER_DISABLE;
   DDS2_RESET_PULSE_COUNTER;
- }
-
-void InitTimer2INTMode(void)
- {
-  RESET_TIMER2;
-  EnableIntTMR2; // Enable timer2 interrupts
-  Timer2Disable; 
  }
 
 void InitTimer3INTMode(void)
@@ -35,9 +30,9 @@ void InitTimer3INTMode(void)
   Timer3Disable; 
  }
  
- void InitTimer4INTMode(void)
+void InitTimer5INTMode(void)
  {
-  RESET_TIMER4;
-  EnableIntTMR4; // Enable timer2 interrupts
-  Timer4Disable; 
+  RESET_TIMER5;
+  EnableIntTMR5; // Enable timer5 interrupts
+  Timer5Disable; 
  }

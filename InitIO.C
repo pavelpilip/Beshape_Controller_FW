@@ -13,8 +13,6 @@
 void InitIO()
 {
 
-//ADCON1 = 0x09;
-
 // MAPPING BUSES TO RELEVANT PINS
 	
 	RPINR8_9 = (RPINR8_9 & 0x0F) | 0x40; // MAP SDI TO RP16
@@ -92,8 +90,8 @@ void InitIO()
 	 tris_DDS1_SYN_FQ_UD = 0; 
 	 DDS1_SQ_OUT = 0; 
 	 tris_DDS1_SQ_OUT = 1; 
-	 DDS1_OUT_A_ENABLE = 0; 
-	 tris_DDS1_OUT_A_ENABLE = 0; 
+	 DDS1_OUT_ENABLE = 0; 
+	 tris_DDS1_OUT_ENABLE = 0; 
 	 DDS1_GEN_FAIL_INT = 0; 
 	 tris_DDS1_GEN_FAIL_INT = 0; 
 	 DDS1_SYN_D7 = 0; 
@@ -104,8 +102,8 @@ void InitIO()
 	 tris_DDS1_SYN_W_CLK = 0; 
 	 DDS1_POT_RESETn = 0; 
 	 tris_DDS1_POT_RESETn = 0; 
-	 DDS1_OUT_B_ENABLE = 0; 
-	 tris_DDS1_OUT_B_ENABLE = 0; 
+	/* DDS1_OUT_B_ENABLE = 0; 
+	 tris_DDS1_OUT_B_ENABLE = 0; */
 	 DDS1_POT_SSn = 1; 
 	 tris_DDS1_POT_SSn = 0; 
 	
@@ -121,8 +119,8 @@ void InitIO()
 	 tris_DDS2_SYN_FQ_UD = 0; 
 	 DDS2_SQ_OUT = 0; 
 	 tris_DDS2_SQ_OUT = 1; 
-	 DDS2_OUT_A_ENABLE = 0; 
-	 tris_DDS2_OUT_A_ENABLE = 0; 
+	 DDS2_OUT_ENABLE = 0; 
+	 tris_DDS2_OUT_ENABLE = 0; 
 	 DDS2_GEN_FAIL_INT = 0; 
 	 tris_DDS2_GEN_FAIL_INT = 0; 
 	 DDS2_SYN_D7 = 0; 
@@ -133,8 +131,8 @@ void InitIO()
 	 tris_DDS2_SYN_W_CLK = 0; 
 	 DDS2_POT_RESETn = 0; 
 	 tris_DDS2_POT_RESETn = 0; 
-	 DDS2_OUT_B_ENABLE = 0; 
-	 tris_DDS2_OUT_B_ENABLE = 0; 
+	/* DDS2_OUT_B_ENABLE = 0; 
+	 tris_DDS2_OUT_B_ENABLE = 0; */
 	 DDS2_POT_SSn = 1; 
 	 tris_DDS2_POT_SSn = 0; 
 	
@@ -144,10 +142,10 @@ void InitIO()
 	 tris_AMP_GPIO_OUT1 = 0; 
 	 AMP_GPIO_OUT2 = 0; 
 	 tris_AMP_GPIO_OUT2 = 0; 
-	 AMP_GPIO_OUT3 = 0; 
+/*	 AMP_GPIO_OUT3 = 0; 
 	 tris_AMP_GPIO_OUT3 = 0; 
 	 AMP_GPIO_OUT4 = 0; 
-	 tris_AMP_GPIO_OUT4 = 0; 
+	 tris_AMP_GPIO_OUT4 = 0; */
 	 AMP_GPIO_OUT5 = 0; 
 	 tris_AMP_GPIO_OUT5 = 0; 
 	 AMP_GPIO_OUT6 = 0; 
@@ -162,6 +160,13 @@ void InitIO()
 	 tris_AMP_ENABLE = 0; 
 	 AMP_ENABLE2 = 0; 
 	 tris_AMP_ENABLE2 = 0; 
+
+// FPGA PIC CONTROL
+
+	FPGA_DSP_GPIO9 = 0;
+	tris_FPGA_DSP_GPIO9 = 1;
+	FPGA_DSP_GPIO10 = 0;
+	tris_FPGA_DSP_GPIO10 = 1; 
 	
 // SPI INTERFACE CONTROL
 
@@ -218,15 +223,15 @@ void InitIO()
 
 Main_Interrupt_Detected = 0;
 Main_Interrupt_Detection_Rizedge;
-Main_Interrupt_Detection_Enable;
+Main_Interrupt_Detection_Disable;
 
 Power_On_Detected = 0;
 Power_On_Detection_High_Priority;
 Power_On_Detection_Rizedge;
-Power_On_Detection_Enable;
+Power_On_Detection_Disable;
 	 
-GlobalINT = 1; // enable all interrupts
-Peripheral_Int_En = 1; // enable usart interrupts
-ENABLE_INT_PRIORITY	= 1; // enable high priority interrupts
+GlobalINT = 0; // enable all interrupts
+Peripheral_Int_En = 0; // enable usart interrupts
+ENABLE_INT_PRIORITY	= 0; // enable high priority interrupts
 
 }	

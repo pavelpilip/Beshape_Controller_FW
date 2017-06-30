@@ -4,6 +4,7 @@
 
 #include "util.h"
 #include "SPI.h"
+#include <delays.h>
 
 void InitSPI1Master()
 {
@@ -16,6 +17,8 @@ void InitSPI1Master()
 	DSP_SPIB_CS = 1; // DISABLE SLAVE SELECT
 	PIC_SPI_Status = 0x00; 			
 	PIC_SPI_Control = 0x12; // SPI module configured as master with 1MHZ clock
+//	PIC_SPI_Status = 0x40; 			
+//	PIC_SPI_Control = 0x02; // SPI module configured as master with 1MHZ clock
 	DisableIntSPI;
 }
 
@@ -34,16 +37,8 @@ void InitSPI1Slave()
 	
 }	
 
-/*void Send_Status_To_The_Master(char Word)
+char Read_From_SPI(void) // IF RETURN 0, NO DATA READY IN THE BUFFER
 {
-	char tmp = 0;
-	tmp = PIC_SPI_Buffer;
-	PIC_SPI_Buffer = Word;
-}*/
-
-char Read_From_SPI() // IF RETURN 0, NO DATA READY IN THE BUFFER
-{
-	unsigned long volatile tmp = 0;
 	char SPI_Word_Backup = 0;
 	
 	if (PIC_SPI_Ready) 				// WAIT FOR READY, WORD IS RECEIVED
@@ -57,6 +52,7 @@ char Read_From_SPI() // IF RETURN 0, NO DATA READY IN THE BUFFER
 
 char Write_To_SPI(char Device, char Data) // IF RETURN 0, TRANSACTION SEND ERROR
 {
+	char Received_SPI_Value = 0;
 	if (!PIC_SPI_Ready) // WAIT FOR READY
 	{	
 		switch (Device) // OPEN THE RELEVANT ADC INPUT
@@ -96,6 +92,12 @@ char Write_To_SPI(char Device, char Data) // IF RETURN 0, TRANSACTION SEND ERROR
 				DSP_SPIB_SEL1 = 0; 
 				DSP_SPIB_SEL2 = 1; 
 				DSP_SPIB_SEL3 = 0;
+				PIC_SPI_Disable;
+				Delay_6_25US(1); // delay 7 usec
+				PIC_SPI_Status = 0x40; 			
+				PIC_SPI_Control = 0x02; // SPI module configured as master with 1MHZ clock
+				PIC_SPI_Enable;
+				Delay_6_25US(1); // delay 7 usec
 				break;
 			case EEPROM_SPI: 
 				DSP_SPIB_SEL0 = 0; 
@@ -145,7 +147,18 @@ char Write_To_SPI(char Device, char Data) // IF RETURN 0, TRANSACTION SEND ERROR
 		while (!PIC_SPI_Ready);
 		if ((Device != Expander_A_SPI) && (Device != Expander_B_SPI) && (Device != Expander_C_SPI) && (Device != Expander_D_SPI)) 
 			DSP_SPIB_CS = 1; // DISABLE SPI BUS
-		return (Read_From_SPI());
+		Received_SPI_Value = Read_From_SPI();
+		
+		if (Device == FPGA_SPI)
+		{
+			PIC_SPI_Disable;
+			Delay_6_25US(1); // delay 7 usec
+			PIC_SPI_Status = 0x00; 			
+			PIC_SPI_Control = 0x12; // SPI module configured as master with 1MHZ clock
+			PIC_SPI_Enable;
+			Delay_6_25US(1); // delay 7 usec
+		}
+		return (Received_SPI_Value);
 	}
 	else return (0);
 }

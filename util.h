@@ -23,6 +23,7 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 	#define Vol_Mon_Max_Samples_Number 10
 	#define Maximum_Allowable_Transactions 3
 	#define Vref 3
+	#define System_Registers_Number 45
 
 /*************************************AMPLITUDE MEASUREMENT PARAMETERS********************/
 	#define Divider 2
@@ -42,10 +43,15 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 	#define HPTEC_Att_Coefficient 0.35
 	
 /*****************************************************************************************/
-	
-	#define System_Registers_Number 41
 
-//A2D DEFINITIONS
+/*************************************TEC MODULE VOLTAGE SET PARAMETERS********************/
+	#define TEC_Voltage_Low_Limit_Value 250 // 2.5V
+	#define TEC_Voltage_High_Limit_Value 850 // 8.5V
+/*****************************************************************************************/	
+	
+	
+	
+	//A2D DEFINITIONS
 	
 	#define AMP_FRWD_PWR_SNS_LOW_THRESHOLD2 0
 	#define AMP_FRWD_PWR_SNS_LOW_THRESHOLD1 0
@@ -155,12 +161,6 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 	#define Expander_C_SPI 0xA
 	#define Expander_D_SPI 0xB
 
-// A2D WORKING MODES DEFINITION
-	
-	#define IDLE 0x0
-	#define Manual_Working_Mode 0x1
-	#define Operational_Working_Mode 0x2	
-
 // SYSTEM WORKING MODES DEFINITION
 	
 	#define System_Idle_Mode 0x0
@@ -183,7 +183,7 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 	#define DDS2_Amplitude_Error 0xA
 	#define DDS1_Amplitude_Measure_Error 0xB
 	#define DDS2_Amplitude_Measure_Error 0xC
-	#define A2D_Conversion_Error 0xD
+	#define Amplifier_Pulse_Mode_Word_Error 0xD
 	#define P3V3_Domain_Error 0xE
 	#define P5V_Domain_Error 0xF
 	#define N5V_Domain_Error 0x10
@@ -192,6 +192,7 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 	#define P24V_Domain_Error 0x13
 	#define P150V_Domain_Error 0x14
 	#define P48V_Domain_Error 0x15
+	#define Parser_Working_Error 0x16
 	
 // ANALOG INPUTS
 
@@ -256,8 +257,8 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 	#define tris_DDS1_SYN_FQ_UD TRISBbits.TRISB4
 	#define DDS1_SQ_OUT PORTDbits.RD1
 	#define tris_DDS1_SQ_OUT TRISDbits.TRISD1
-	#define DDS1_OUT_A_ENABLE PORTFbits.RF3
-	#define tris_DDS1_OUT_A_ENABLE TRISFbits.TRISF3
+	/*#define DDS1_OUT_ENABLE PORTFbits.RF3
+	#define tris_DDS1_OUT_ENABLE TRISFbits.TRISF3*/
 	#define DDS1_GEN_FAIL_INT PORTJbits.RJ2
 	#define tris_DDS1_GEN_FAIL_INT TRISJbits.TRISJ2
 	#define DDS1_SYN_D7 PORTJbits.RJ3
@@ -268,8 +269,8 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 	#define tris_DDS1_SYN_W_CLK TRISKbits.TRISK4
 	#define DDS1_POT_RESETn PORTKbits.RK5
 	#define tris_DDS1_POT_RESETn TRISKbits.TRISK5
-	#define DDS1_OUT_B_ENABLE PORTLbits.RL4
-	#define tris_DDS1_OUT_B_ENABLE TRISLbits.TRISL4
+	#define DDS1_OUT_ENABLE PORTLbits.RL4
+	#define tris_DDS1_OUT_ENABLE TRISLbits.TRISL4
 	#define DDS1_POT_SSn PORTLbits.RL5
 	#define tris_DDS1_POT_SSn TRISLbits.TRISL5
 	
@@ -285,8 +286,8 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 	#define tris_DDS2_SYN_FQ_UD TRISDbits.TRISD6
 	#define DDS2_SQ_OUT PORTEbits.RE0
 	#define tris_DDS2_SQ_OUT TRISEbits.TRISE0
-	#define DDS2_OUT_A_ENABLE PORTKbits.RK2
-	#define tris_DDS2_OUT_A_ENABLE TRISKbits.TRISK2
+	#define DDS2_OUT_ENABLE PORTKbits.RK2
+	#define tris_DDS2_OUT_ENABLE TRISKbits.TRISK2
 	#define DDS2_GEN_FAIL_INT PORTJbits.RJ2
 	#define tris_DDS2_GEN_FAIL_INT TRISJbits.TRISJ2
 	#define DDS2_SYN_D7 PORTLbits.RL0
@@ -297,19 +298,15 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 	#define tris_DDS2_SYN_W_CLK TRISDbits.TRISD7
 	#define DDS2_POT_RESETn PORTEbits.RE7
 	#define tris_DDS2_POT_RESETn TRISEbits.TRISE7
-	#define DDS2_OUT_B_ENABLE PORTKbits.RK1
-	#define tris_DDS2_OUT_B_ENABLE TRISKbits.TRISK1
+	/*#define DDS2_OUT_B_ENABLE PORTKbits.RK1
+	#define tris_DDS2_OUT_B_ENABLE TRISKbits.TRISK1*/
 	#define DDS2_POT_SSn PORTJbits.RJ0
 	#define tris_DDS2_POT_SSn TRISJbits.TRISJ0
 	
-	#define DDS1_OUT_ON DDS1_OUT_A_ENABLE = 0; \
-		DDS1_OUT_B_ENABLE = 1;
-	#define DDS1_OUT_OFF DDS1_OUT_A_ENABLE = 1; \
-		DDS1_OUT_B_ENABLE = 0;
-	#define DDS2_OUT_ON DDS2_OUT_A_ENABLE = 0; \
-		DDS2_OUT_B_ENABLE = 1;
-	#define DDS2_OUT_OFF DDS2_OUT_A_ENABLE = 1; \
-		DDS2_OUT_B_ENABLE = 0;
+	#define DDS1_OUT_ON DDS1_OUT_ENABLE = 0; 
+	#define DDS1_OUT_OFF DDS1_OUT_ENABLE = 1; 
+	#define DDS2_OUT_ON DDS2_OUT_ENABLE = 0; 
+	#define DDS2_OUT_OFF DDS2_OUT_ENABLE = 1; 
 	
 // AMPLIFIER CONTROL
 
@@ -317,10 +314,10 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 	#define tris_AMP_GPIO_OUT1 TRISLbits.TRISL6
 	#define AMP_GPIO_OUT2 PORTLbits.RL7
 	#define tris_AMP_GPIO_OUT2 TRISLbits.TRISL7
-	#define AMP_GPIO_OUT3 PORTCbits.RC1
+/*	#define AMP_GPIO_OUT3 PORTCbits.RC1 // TRANSFFERED TO EXPANDER
 	#define tris_AMP_GPIO_OUT3 TRISCbits.TRISC1
 	#define AMP_GPIO_OUT4 PORTCbits.RC0
-	#define tris_AMP_GPIO_OUT4 TRISCbits.TRISC0
+	#define tris_AMP_GPIO_OUT4 TRISCbits.TRISC0*/
 	#define AMP_GPIO_OUT5 PORTKbits.RK0
 	#define tris_AMP_GPIO_OUT5 TRISKbits.TRISK0
 	#define AMP_GPIO_OUT6 PORTJbits.RJ4
@@ -335,6 +332,13 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 	#define tris_AMP_ENABLE TRISEbits.TRISE3
 	#define AMP_ENABLE2 PORTEbits.RE2
 	#define tris_AMP_ENABLE2 TRISEbits.TRISE2
+
+// FPGA PIC CONTROL
+
+	#define FPGA_DSP_GPIO9 PORTCbits.RC1 
+	#define tris_FPGA_DSP_GPIO9 TRISCbits.TRISC1
+	#define FPGA_DSP_GPIO10 PORTCbits.RC0
+	#define tris_FPGA_DSP_GPIO10 TRISCbits.TRISC0
 	
 // SPI INTERFACE CONTROL
 
@@ -396,7 +400,7 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 // INTERRUPT CONFIGURATIONS
 	
 	// Peripheral interrupt enable
-	#define Peripheral_Int_En INTCONbits.PEIE 	
+	#define Peripheral_Int_En INTCONbits.GIEL 	
 
 // Global flag for enabling interrupts priority 
 	#define ENABLE_INT_PRIORITY RCONbits.IPEN 
@@ -450,27 +454,6 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 		TMR1H = 0x00; \
 		TMR1L = 0x00;
 
-// Timer2 Init
-//--------------
-
-#define TMR2_INTFLAG PIR1bits.TMR2IF
-
-#define Timer2Enable T2CONbits.TMR2ON =  1;	// enable, 8bits timer, prescaler = (16MHz / 4 / 16 / 16). Each tick = 64 us
-#define Timer2Disable T2CONbits.TMR2ON =  0; // disable
-
-#define RESET_TIMER2  T2CON = 0x7B; \
-					  TMR2 = 0x9A; //  timer programmed to interrupt after 6.5mS
-					 
-// Macro to setup timer interrupt
-#define EnableIntTMR2 TMR2_INTFLAG = 0; \
-					  IPR1bits.TMR2IP = 1; \
-					  PIE1bits.TMR2IE = 1;
-
-// Macro to disable timer interrupt
-#define DisableIntTMR2 TMR2_INTFLAG = 0; \
-					   IPR1bits.TMR2IP = 1; \
-					   PIE1bits.TMR2IE = 0;
-					   
 // Timer3 Init
 //--------------
 
@@ -494,27 +477,30 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 					   IPR2bits.TMR3IP = 1; \
 					   PIE2bits.TMR3IE = 0;
 					   
-// Timer4 Init
+// Timer5 Init
 //--------------
 
-#define TMR4_INTFLAG PIR5bits.TMR4IF
+#define TMR5_INTFLAG PIR5bits.TMR5IF
 
-#define Timer4Enable T4CONbits.TMR4ON =  1;	// enable, 8bits timer, prescaler = (64MHz / 4 / 16 / 16). Each tick = 160 us
-#define Timer4Disable T4CONbits.TMR4ON =  0; // disable
+#define Timer5Enable T5CONbits.TMR5ON =  1;	// enable, 8bits timer
+#define Timer5Disable T5CONbits.TMR5ON =  0; // disable
 
-#define RESET_TIMER4  T4CON = 0x7B; \
-					  TMR4 = 0x00; //  timer programmed to interrupt after 6.5mS
+//prescaler = (64MHz / 4 / 8). Each tick = 0.5 us
+#define RESET_TIMER5 T5CON = 0x32; \
+		TMR5H = 0xD8; \
+		TMR5L = 0xEF; //  timer programmed to interrupt after 5mS
 					 
 // Macro to setup timer interrupt
-#define EnableIntTMR4 TMR4_INTFLAG = 0; \
-					  IPR5bits.TMR4IP = 1; \
-					  PIE5bits.TMR4IE = 1;
+#define EnableIntTMR5 TMR5_INTFLAG = 0; \
+					  IPR5bits.TMR5IP = 1; \
+					  PIE5bits.TMR5IE = 1;
 
 // Macro to disable timer interrupt
-#define DisableIntTMR4 TMR4_INTFLAG = 0; \
-					   IPR5bits.TMR4IP = 1; \
-					   PIE5bits.TMR4IE = 0;
+#define DisableIntTMR5 TMR5_INTFLAG = 0; \
+					   IPR5bits.TMR5IP = 1; \
+					   PIE5bits.TMR5IE = 0;
 					   
+
 // DELAY IDENTIFIER VARIABLE
 
 #define WAIT_0_625US(_a_) Delay10TCYx(_a_);
@@ -589,9 +575,6 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 	
 	#define A2D_Sample_Start ADCON1Lbits.SAMP = 1;
 	#define A2D_Convertion_Start ADCON1Lbits.SAMP = 0;
-	
-	#define A2D_Scan_Enable ADCON2Hbits.CSCNA = 1;
-	#define A2D_Scan_Disable ADCON2Hbits.CSCNA = 0;
 	
 	#define A2D_Conversion_Completed ADCON1Lbits.DONE
 	

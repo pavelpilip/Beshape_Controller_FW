@@ -7,7 +7,3 @@
 BOOL Write_To_PC(char Data);
 
 char Read_From_PC();
-
-//void Word_To_Byte(int Parameter);
-
-//BOOL Transmitt_To_PC(int Word);

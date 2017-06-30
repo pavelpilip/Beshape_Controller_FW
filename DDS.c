@@ -107,11 +107,7 @@ int Get_Amplitude_Value(BOOL DDS_Number, BOOL Before_After_Switch) // SAMPLE AMP
 			else A2D_Manual_Convert(SMA2_OUT_SNS);
 		}
 	
-	if (!Wait_For_Completion())
-		{
-			Send_Error_Word(A2D_Conversion_Error);
-			return(1); // RETURN VALUE THAT WILL FORCE TIMEOUT TO THE AMPLITUDE MEASUREMENT, BECAUSE IT WILL NEVER WILL BE 0
-		}
+	Wait_For_Completion();
 	
 	if (!Before_After_Switch)
 		{
@@ -132,25 +128,17 @@ int Output_Amplitude_Measure(BOOL DDS_Number, BOOL Before_After_Switch) // MEASU
 	int Amplitude_Tmp_Value = 0, Amplitude_Value = 0, counter = 0;
 	float Amplitude_Real_Value = 0;
 	
-	Timer2Disable;
-	System_Domains_Measure_Enable_Flag = FALSE;
-	TMR2_INTFLAG = 0; // DISABLE TIMEOUT TIMER
-	RESET_TIMER2;
+	Timer3Disable;
+	TMR3_INTFLAG = 0; // DISABLE TIMEOUT TIMER
+	RESET_TIMER3;
 	System_Work_Mode = System_Configuration_Mode;
-	Timeout_Counter = 0;
 	A2D_Sine_Amplitude_Timeout_Counter = 0;
 	
 	Frequency_Value_Set(100, DDS_Number); // SET FREQUENCY TO 100HZ
-	
-	//Delay_625US(45); // delay 30 msec
-	
-/*	Init_ADC(Manual_Working_Mode, FALSE);
-	Set_A2D_Mode(Manual_Working_Mode);
-	A2D_Module_Enable;*/
 
 	Amplitude_Tmp_Value = Get_Amplitude_Value(DDS_Number, Before_After_Switch); // TAKE FIRST SAMPLE
 
-	Timer4Enable; // SWITCH ON TIMEOUT TIMER
+	Timer3Enable; // SWITCH ON TIMEOUT TIMER
 	
 	while (Amplitude_Tmp_Value != 0) // WAIT UNTIL SINUS WILL RIZE
 		{
@@ -165,11 +153,11 @@ int Output_Amplitude_Measure(BOOL DDS_Number, BOOL Before_After_Switch) // MEASU
 				}
 		}
 	
-	TMR4_INTFLAG = 0; // DISABLE TIMEOUT TIMER
-	Timer4Disable;
-	RESET_TIMER4;
+	TMR3_INTFLAG = 0; // DISABLE TIMEOUT TIMER
+	Timer3Disable;
+	RESET_TIMER3;
 	A2D_Sine_Amplitude_Timeout_Counter = 0;
-	Timer4Enable; // SWITCH ON TIMEOUT TIMER
+	Timer3Enable; // SWITCH ON TIMEOUT TIMER
 
 	while (Amplitude_Tmp_Value >= Amplitude_Value) // WAIT UNTIL SINUS WILL FALL
 		{
@@ -181,19 +169,15 @@ int Output_Amplitude_Measure(BOOL DDS_Number, BOOL Before_After_Switch) // MEASU
 					Timeout = FALSE;
 					if (!DDS_Number) Send_Error_Word(DDS1_Amplitude_Measure_Error);
 					else Send_Error_Word(DDS2_Amplitude_Measure_Error);
-					//break;
 					return(0);
 				}
 		}
 		
-	TMR4_INTFLAG = 0; // DISABLE TIMEOUT TIMER
-	Timer4Disable;
-	RESET_TIMER4;
+	TMR3_INTFLAG = 0; // DISABLE TIMEOUT TIMER
+	Timer3Disable;
+	RESET_TIMER3;
 	A2D_Sine_Amplitude_Timeout_Counter = 0;
-		
-	/*Set_A2D_Mode(IDLE);
-	A2D_Automatic_Convert(IDLE, FALSE, TRUE);*/
-
+	
 	if (!DDS_Number) Frequency_Value_Set(DDS1_Frequency_Value * 1000, DDS_Number); // SET ORIGINAL FREQUENCY
 	else Frequency_Value_Set(DDS2_Frequency_Value * 1000, DDS_Number);
 
@@ -215,10 +199,10 @@ int Output_Amplitude_Measure(BOOL DDS_Number, BOOL Before_After_Switch) // MEASU
 	Amplitude_Value = Amplitude_Real_Value * Total_Signal_Gain * 1000;
 	
 	System_Work_Mode = System_Idle_Mode;
-	TMR2_INTFLAG = 0; // DISABLE TIMEOUT TIMER
-	RESET_TIMER2;
+	TMR5_INTFLAG = 0; // DISABLE TIMEOUT TIMER
+	RESET_TIMER5;
 	Timeout_Counter = 0;
-	Timer2Enable;
+	Timer5Enable;
 	
 	return(Amplitude_Value);
 }

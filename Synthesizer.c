@@ -22,18 +22,7 @@ void Synthesizer_Bit_Strobe(BOOL DDS_Number) // INSERT WORD/BIT TO REGISTER/S
 			DDS2_SYN_W_CLK = 0;
 		}
  }
- 
-/* void Synthesizer_Bit_Strobe(BOOL DDS_Number) // INSERT WORD/BIT TO REGISTER/S
- {
-			DDS1_SYN_W_CLK = 0;
-			DDS1_SYN_W_CLK = 1;
-			DDS1_SYN_W_CLK = 0;
-		
-			DDS2_SYN_W_CLK = 0;
-			DDS2_SYN_W_CLK = 1;
-			DDS2_SYN_W_CLK = 0;
- }*/
- 
+
  void Synthesizer_Apply_Changes(BOOL DDS_Number) // APPLY CHANGES OF REGISTERS TO SYNTHESIZER DEVICE
  {
 	if (!DDS_Number)
@@ -50,18 +39,6 @@ void Synthesizer_Bit_Strobe(BOOL DDS_Number) // INSERT WORD/BIT TO REGISTER/S
 		}
  }
  
- /*void Synthesizer_Apply_Changes(BOOL DDS_Number) // APPLY CHANGES OF REGISTERS TO SYNTHESIZER DEVICE
- {
-	
-			DDS1_SYN_FQ_UD = 0;
-			DDS1_SYN_FQ_UD = 1;
-			DDS1_SYN_FQ_UD = 0;
-		
-			DDS2_SYN_FQ_UD = 0;
-			DDS2_SYN_FQ_UD = 1;
-			DDS2_SYN_FQ_UD = 0;
- }*/
-	
 void Synthesizer_Control_Write(long frequency, char phase, char Power_Down, BOOL DDS_Number)
  {
 	
@@ -97,41 +74,6 @@ void Synthesizer_Control_Write(long frequency, char phase, char Power_Down, BOOL
 	Synthesizer_Apply_Changes(DDS_Number);
 		
  }
- 
-/* void Synthesizer_Control_Write(long frequency, char phase, char Power_Down, BOOL DDS_Number)
- {
-	
-	int i = 0;
-	
-	for (i = 0; i < 32; i++) // INSERT FREQUENCY WORD
-		{
-			DDS1_SYN_D7 = frequency & 0x01;
-			DDS2_SYN_D7 = frequency & 0x01;
-			frequency = frequency >> 1;
-			Synthesizer_Bit_Strobe(DDS_Number);
-		}
-		
-		DDS1_SYN_D7 = 0;
-		DDS2_SYN_D7 = 0;
-		Synthesizer_Bit_Strobe(DDS_Number);
-		DDS1_SYN_D7 = 0;
-		DDS2_SYN_D7 = 0;
-		Synthesizer_Bit_Strobe(DDS_Number);
-		
-		DDS1_SYN_D7 = Power_Down; // BIT 34 IS POWER DOWN, IF "1" SO DEVICE POWER DOWN
-		DDS2_SYN_D7 = Power_Down; 
-		Synthesizer_Bit_Strobe(DDS_Number);
-		
-		for (i = 0; i < 5; i++) // INSERT PHASE WORD
-		{
-			DDS1_SYN_D7 = phase & 0x01; 
-			DDS2_SYN_D7 = phase & 0x01; 
-			phase = phase >> 1;
-			Synthesizer_Bit_Strobe(DDS_Number);
-		}
-		
-	Synthesizer_Apply_Changes(DDS_Number);
-}*/
 	
 void Synthesizer_Device_Init(BOOL DDS_Number) // SYNTHESIZER INITIALIZATION SEQUENCE
  {
