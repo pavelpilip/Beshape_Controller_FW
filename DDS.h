@@ -10,6 +10,8 @@ void Frequency_Value_Set(long Value, BOOL DDS_Number);
 
 int Swing_Compensation_Table(int DDS_Frequency_Value, int DDS_Amplitude_Value);
 
+//float Swing_Compensation_Table(int DDS_Frequency_Value, int DDS_Amplitude_Value);
+
 long Output_Frequency_Measure(BOOL DDS_Number);
 
 BOOL Validate_Frequency_Setting(long Value, BOOL DDS_Number);

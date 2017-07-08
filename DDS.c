@@ -24,11 +24,20 @@ void Frequency_Value_Set(long Value, BOOL DDS_Number) // SET DDS GENERATOR
 int Swing_Compensation_Table(int DDS_Frequency_Value, int DDS_Amplitude_Value)
 {
 	int Amplitude_Swing_Value = 0;
+	if ((DDS_Frequency_Value >= 2000) && (DDS_Frequency_Value <= 2250) && (DDS_Amplitude_Value > 100)) Amplitude_Swing_Value = DDS_Amplitude_Value * 1.1;
+	else if ((DDS_Frequency_Value > 2250) && (DDS_Frequency_Value <= 2500) && (DDS_Amplitude_Value > 100)) Amplitude_Swing_Value = DDS_Amplitude_Value * 1.11;
+	else Amplitude_Swing_Value = DDS_Amplitude_Value;
+	return(Amplitude_Swing_Value);	
+}
+
+/*float Swing_Compensation_Table(int DDS_Frequency_Value, int DDS_Amplitude_Value)
+{
+	float Amplitude_Swing_Value = 0;
 	if ((DDS_Frequency_Value >= 2000) && (DDS_Frequency_Value <= 2250) && (DDS_Amplitude_Value > 1000)) Amplitude_Swing_Value = DDS_Amplitude_Value * 1.1;
 	else if ((DDS_Frequency_Value > 2250) && (DDS_Frequency_Value <= 2500) && (DDS_Amplitude_Value > 1000)) Amplitude_Swing_Value = DDS_Amplitude_Value * 1.11;
 	else Amplitude_Swing_Value = DDS_Amplitude_Value;
 	return(Amplitude_Swing_Value);	
-}
+}*/
 
 long Output_Frequency_Measure(BOOL DDS_Number) // MEASURE OUTPUT SINUS FREQUENCY
 {	
@@ -52,13 +61,13 @@ long Output_Frequency_Measure(BOOL DDS_Number) // MEASURE OUTPUT SINUS FREQUENCY
 			
 			if (!DDS_Number)
 				{
-					Tmp1 = TMR0L;
-					Tmp2 = TMR0H;
+					Tmp1 = TMR1L;
+					Tmp2 = TMR1H;
 				}
 			else
 				{
-					Tmp1 = TMR1L;
-					Tmp2 = TMR1H;
+					Tmp1 = TMR0L;
+					Tmp2 = TMR0H;
 				}
 			Pulse_Counter = Tmp2 * 0x100 + Tmp1;
 			Frequency_Measured_Value = Frequency_Measured_Value + Pulse_Counter; // ACCUMULATE DDS1 COUNTED PULSES
@@ -178,8 +187,8 @@ int Output_Amplitude_Measure(BOOL DDS_Number, BOOL Before_After_Switch) // MEASU
 	RESET_TIMER3;
 	A2D_Sine_Amplitude_Timeout_Counter = 0;
 	
-	if (!DDS_Number) Frequency_Value_Set(DDS1_Frequency_Value * 1000, DDS_Number); // SET ORIGINAL FREQUENCY
-	else Frequency_Value_Set(DDS2_Frequency_Value * 1000, DDS_Number);
+	if (!DDS_Number) Frequency_Value_Set((long)((long)DDS1_Frequency_Value * (long)1000), DDS_Number); // SET ORIGINAL FREQUENCY
+	else Frequency_Value_Set((long)((long)DDS2_Frequency_Value * (long)1000), DDS_Number);
 
 	Amplitude_Real_Value = Amplitude_Value; // CONVERT TO FLOAT 
 	Amplitude_Real_Value  = (Amplitude_Real_Value * Vref) / 4096; // CALCULATE REAL SINE (STEP * DIGITAL NUMBER)
@@ -187,16 +196,16 @@ int Output_Amplitude_Measure(BOOL DDS_Number, BOOL Before_After_Switch) // MEASU
 
 	if (!DDS_Number)
 		{
-			if ((DDS1_Frequency_Value >= 1000) && (DDS1_Frequency_Value < 2000) && (System_Registers_Array[10] > 1000)) Amplitude_Real_Value = Amplitude_Real_Value / 1.1;
-			if ((DDS1_Frequency_Value >= 2000) && (DDS1_Frequency_Value <= 2500) && (System_Registers_Array[10] > 1000)) Amplitude_Real_Value = Amplitude_Real_Value / 1.21;
+			if ((DDS1_Frequency_Value >= 1000) && (DDS1_Frequency_Value < 2000) && (System_Registers_Array[10] >= 100)) Amplitude_Real_Value = Amplitude_Real_Value / 1.1;
+			if ((DDS1_Frequency_Value >= 2000) && (DDS1_Frequency_Value <= 2500) && (System_Registers_Array[10] >= 100)) Amplitude_Real_Value = Amplitude_Real_Value / 1.21;
 		}
 	else
 		{
-			if ((DDS2_Frequency_Value >= 1000) && (DDS2_Frequency_Value < 2000) && (System_Registers_Array[15] > 1000)) Amplitude_Real_Value = Amplitude_Real_Value / 1.1;
-			if ((DDS2_Frequency_Value >= 2000) && (DDS2_Frequency_Value <= 2500) && (System_Registers_Array[15] > 1000)) Amplitude_Real_Value = Amplitude_Real_Value / 1.21;
+			if ((DDS2_Frequency_Value >= 1000) && (DDS2_Frequency_Value < 2000) && (System_Registers_Array[15] >= 100)) Amplitude_Real_Value = Amplitude_Real_Value / 1.1;
+			if ((DDS2_Frequency_Value >= 2000) && (DDS2_Frequency_Value <= 2500) && (System_Registers_Array[15] >= 100)) Amplitude_Real_Value = Amplitude_Real_Value / 1.21;
 		}
 		
-	Amplitude_Value = Amplitude_Real_Value * Total_Signal_Gain * 1000;
+	Amplitude_Value = Amplitude_Real_Value * 1000;
 	
 	System_Work_Mode = System_Idle_Mode;
 	TMR5_INTFLAG = 0; // DISABLE TIMEOUT TIMER

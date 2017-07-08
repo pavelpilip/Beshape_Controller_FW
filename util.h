@@ -19,16 +19,14 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 //MAIN DEFINITIONS
 
 	#define MCU_Version_Number 0x1
-	#define FPGA_Version_Number 0x1
 	#define Vol_Mon_Max_Samples_Number 10
 	#define Maximum_Allowable_Transactions 3
 	#define Vref 3
 	#define System_Registers_Number 45
 
 /*************************************AMPLITUDE MEASUREMENT PARAMETERS********************/
-	#define Divider 2
-	//#define Total_Signal_Gain 4.65
-	#define Total_Signal_Gain 1
+	#define Divider 3.1276595
+	// #define Total_Signal_Gain 4.65
 /*****************************************************************************************/
 
 /*************************************SYSTEM VOLTAGE DOMAINS MEASUREMENT PARAMETERS********************/
@@ -193,6 +191,8 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 	#define P150V_Domain_Error 0x14
 	#define P48V_Domain_Error 0x15
 	#define Parser_Working_Error 0x16
+	#define Pulser_IC_Error 0x17
+	#define Tissue_temperature_measure_Error 0x18
 	
 // ANALOG INPUTS
 
@@ -435,22 +435,22 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 // Timer0 Init
 //--------------
 
-#define DDS1_PULSE_COUNTER_ENABLE T0CON = 0xA8;
+#define DDS2_PULSE_COUNTER_ENABLE T0CON = 0xA8;
 
-#define DDS1_PULSE_COUNTER_DISABLE T0CON = 0x28; // CONFIGURE TIMER0 TO COUNTER WITHOUT PRESCALER, PRESCALER RATIO 1:2
+#define DDS2_PULSE_COUNTER_DISABLE T0CON = 0x28; // CONFIGURE TIMER0 TO COUNTER WITHOUT PRESCALER, PRESCALER RATIO 1:2
 		
-#define DDS1_RESET_PULSE_COUNTER T0CON = 0x28; \
+#define DDS2_RESET_PULSE_COUNTER T0CON = 0x28; \
 		TMR0H = 0x00; \
 		TMR0L = 0x00;
 		
 // Timer1 Init
 //--------------
 
-#define DDS2_PULSE_COUNTER_ENABLE T1CON = 0x87;
+#define DDS1_PULSE_COUNTER_ENABLE T1CON = 0x87;
 
-#define DDS2_PULSE_COUNTER_DISABLE T1CON = 0x86; // CONFIGURE TIMER1 TO COUNTER WITHOUT PRESCALER, PRESCALER RATIO 1:1, EXTERNAL CLOCK INPUT NOT SYNCHRONIZED
+#define DDS1_PULSE_COUNTER_DISABLE T1CON = 0x86; // CONFIGURE TIMER1 TO COUNTER WITHOUT PRESCALER, PRESCALER RATIO 1:1, EXTERNAL CLOCK INPUT NOT SYNCHRONIZED
 		
-#define DDS2_RESET_PULSE_COUNTER T1CON = 0x86; \
+#define DDS1_RESET_PULSE_COUNTER T1CON = 0x86; \
 		TMR1H = 0x00; \
 		TMR1L = 0x00;
 

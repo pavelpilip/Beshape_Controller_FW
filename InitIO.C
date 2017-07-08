@@ -90,7 +90,7 @@ void InitIO()
 	 tris_DDS1_SYN_FQ_UD = 0; 
 	 DDS1_SQ_OUT = 0; 
 	 tris_DDS1_SQ_OUT = 1; 
-	 DDS1_OUT_ENABLE = 0; 
+	 DDS1_OUT_ENABLE = 1; 
 	 tris_DDS1_OUT_ENABLE = 0; 
 	 DDS1_GEN_FAIL_INT = 0; 
 	 tris_DDS1_GEN_FAIL_INT = 0; 
@@ -119,7 +119,7 @@ void InitIO()
 	 tris_DDS2_SYN_FQ_UD = 0; 
 	 DDS2_SQ_OUT = 0; 
 	 tris_DDS2_SQ_OUT = 1; 
-	 DDS2_OUT_ENABLE = 0; 
+	 DDS2_OUT_ENABLE = 1; 
 	 tris_DDS2_OUT_ENABLE = 0; 
 	 DDS2_GEN_FAIL_INT = 0; 
 	 tris_DDS2_GEN_FAIL_INT = 0; 
@@ -220,18 +220,5 @@ void InitIO()
 	 tris_HP_DISP_2 = 1; 
 	 HP_SPI_MUX = 0; 
 	 tris_HP_SPI_MUX = 0; 
-
-Main_Interrupt_Detected = 0;
-Main_Interrupt_Detection_Rizedge;
-Main_Interrupt_Detection_Disable;
-
-Power_On_Detected = 0;
-Power_On_Detection_High_Priority;
-Power_On_Detection_Rizedge;
-Power_On_Detection_Disable;
 	 
-GlobalINT = 0; // enable all interrupts
-Peripheral_Int_En = 0; // enable usart interrupts
-ENABLE_INT_PRIORITY	= 0; // enable high priority interrupts
-
 }	

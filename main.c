@@ -43,10 +43,11 @@ BOOL Amplifier2_Reverse_Power_Read = FALSE,	Amplifier2_Forward_Power_Read = FALS
 BOOL Handpiece_Temperature2_Read = FALSE, Handpiece_Temperature3_Read = FALSE, Handpiece_Temperature4_Read = FALSE,	Handpiece_5V_3_3V_Read = FALSE;				
 BOOL Vacuum_Pressure_Read = FALSE, TEC_Voltage_Read = FALSE, TEC_Voltage_Measure = FALSE, Errors1_Register_Read = FALSE, MCU_FPGA_Version_Read = FALSE;												   
 BOOL Controller_Handpiece_Serial_Read = FALSE, Errors2_Register_Read = FALSE, Amplifier_CW_Mode_Switches_Set = FALSE, Amplifier_Pulse_Mode_Switches_Set = FALSE;
-BOOL CW_Mode_Switches_Register_Read = FALSE, Pulse_Mode_Switches_Register_Read = FALSE;
+BOOL CW_Mode_Switches_Register_Read = FALSE, Pulse_Mode_Switches_Register_Read = FALSE, FPGA_Interrupt_Flag = FALSE, Reset_All_Errors = FALSE;
+BOOL Main_Control_Register_Read = FALSE, Tissue_Temperature_Measurement_Value_Read = FALSE, FPGA_Control_Register = FALSE, FPGA_Control_Register_Read = FALSE;
 
 BOOL UART_Communication_Flag = FALSE, UART_Timeout = FALSE;
-char MSB_Byte = 0, LSB_Byte = 0;
+char MSB_Byte = 0, LSB_Byte = 0, FPGA_Version_Number = 0;
 
 /////////////////////REGISTERS BITS FLAGS MODULE END///////////////////////////////
 
@@ -60,17 +61,12 @@ char System_Work_Mode = System_Idle_Mode;
 int Error1_Register = 0, Error2_Register = 0, Received_PC_Data = 0, System_Registers_Array[System_Registers_Number] = {0};
 int DDS1_Frequency_Value = 0, DDS2_Frequency_Value = 0, DDS1_Amplitude_Value = 0, DDS2_Amplitude_Value = 0, Timeout_Counter = 0, A2D_Sine_Amplitude_Timeout_Counter = 0;
 int Amplifier_CW_Mode_Switches_Value = 0, Amplifier_Pulse_Mode_Switches_Value = 0;
+//float DDS1_Amplitude_Value = 0;
 
 #pragma interrupt high_priority_interrupt
 void high_priority_interrupt (void)
 {
 
-	/*if (SPI_INTFLAG)
-	{
-		DisableIntSPI;
-		return;	
-	}*/
-	
 	if (UART_INTFLAG)
 	{
 		UART_INTFLAG = 0;
@@ -128,14 +124,15 @@ void high_priority_interrupt (void)
 					}*/
 				else Timer5Enable;
 			}
-	}
 		return;
+	}
 
 	if (Main_Interrupt_Detected)
 	{
 		Main_Interrupt_Detection_Disable;
 		Main_Interrupt_Detected = 0;
-		Main_Interrupt_Detection_Enable;
+		PIC_PC_ACK = 0; // CONTROLLER IS BUSY
+		FPGA_Interrupt_Flag = TRUE;
 		return;	
 	}
 
@@ -197,6 +194,8 @@ void Init(void) // INITIALIZATION OF SYSTEM
 	OSCCON4 = 0x20;
 	OSCTUNE = 0x00; 	
 
+	Init_Interrupts();
+	
 	InitSPI1Master();
 	InitTimer0INTMode();
 	InitTimer1INTMode();
@@ -211,17 +210,15 @@ void Init(void) // INITIALIZATION OF SYSTEM
 	Write_To_Extender(Expander_B_SPI, 0x05, 0x00); // DISABLE ALL INTERRUPTS
 	
 	Extender_Init(Expander_C_SPI);
-	Extender_Init(Expander_D_SPI); 
+	Extender_Init(Expander_D_SPI);
+	Delay_625US(100); // delay 62.5 msec, let to the all domains time to disconnect 
 	Extender_Init(Expander_A_SPI);
 	Extender_Init(Expander_B_SPI);
 	
-	Init_Interrupts();
 	System_Power_Init();
-	/*Synthesizer_Device_Init(FALSE);
-	Synthesizer_Device_Init(TRUE);
-	Digital_Potentiometer_Init(FALSE);
-	Digital_Potentiometer_Init(TRUE);*/
 	TEC_Power_Init();
+	
+	FPGA_Version_Number = Read_From_FPGA(0x9);
 	
 	Delay_6_25US(9); // delay 55 usec
 }
@@ -347,27 +344,43 @@ void Send_Error_Word(int Error)
 			break;
 			case P3V3_Domain_Error: 
 				Error2_Register = Error2_Register | 0x08; // SET P3V3 ERROR BIT
+				Test_LED_Operation(2, TRUE);
 			break;
 			case P5V_Domain_Error: 
 				Error2_Register = Error2_Register | 0x10; // SET P5V ERROR BIT
+				Test_LED_Operation(2, TRUE);
 			break;
 			case N5V_Domain_Error: 
 				Error2_Register = Error2_Register | 0x20; // SET N5V ERROR BIT
+				Test_LED_Operation(2, TRUE);
 			break;
+			case Tissue_temperature_measure_Error: 
+				Error2_Register = Error2_Register | 0x40; // SET TISSUE TEMPERATURE MEASURE ERROR BIT
+				Test_LED_Operation(2, TRUE);
+			break;			
 			case P12V_Domain_Error: 
 				Error2_Register = Error2_Register | 0x100; // SET P12V ERROR BIT
+				Test_LED_Operation(2, TRUE);
 			break;
 			case N12V_Domain_Error: 
 				Error2_Register = Error2_Register | 0x200; // SET N12V ERROR BIT
+				Test_LED_Operation(2, TRUE);
 			break;
 			case P24V_Domain_Error: 
 				Error2_Register = Error2_Register | 0x400; // SET P24V ERROR BIT
+				Test_LED_Operation(2, TRUE);
 			break;
 			case P150V_Domain_Error: 
 				Error2_Register = Error2_Register | 0x800; // SET P150V ERROR BIT
+				Test_LED_Operation(2, TRUE);
 			break;
 			case P48V_Domain_Error: 
 				Error2_Register = Error2_Register | 0x1000; // SET P48V ERROR BIT
+				Test_LED_Operation(2, TRUE);
+			break;
+			case Pulser_IC_Error: 
+				Error2_Register = Error2_Register | 0x2000; // SET PULSER IC ERROR BIT
+				Test_LED_Operation(2, TRUE);
 			break;
 			default:
 													
@@ -735,6 +748,64 @@ BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 						System_Registers_Array[Received_Transaction_Address] = Received_PC_Data; // SAVE THE REGISTER VALUE IN THE ARRAY
 						Amplifier_Pulse_Mode_Switches_Set = TRUE;
 						break;
+					case 0x2A: // FPGA control register  
+						System_Registers_Array[Received_Transaction_Address] = Received_PC_Data; // SAVE THE REGISTER VALUE IN THE ARRAY
+						for (Register_BIT_Counter = 0; Register_BIT_Counter < 16; Register_BIT_Counter++) // SHIFT AND CHECK EACH BIT, IGNORE READ ONLY BITS 
+							{
+								Received_Data_Backup = Received_PC_Data & 0x01;
+								if (Received_Data_Backup == 1) 
+									{
+										switch (Register_BIT_Counter) 
+											{
+												case 0x0: 
+														FPGA_Control_Register = TRUE;
+													break;
+												default:
+													
+													break;
+											}
+									}
+								else 
+									{
+										switch (Register_BIT_Counter) 
+											{
+												default:
+													
+													break;
+											}
+									}
+								Received_PC_Data = Received_PC_Data >> 1;
+							}
+						break;
+					case 0x2B: // Main control register  
+						System_Registers_Array[Received_Transaction_Address] = Received_PC_Data; // SAVE THE REGISTER VALUE IN THE ARRAY
+						for (Register_BIT_Counter = 0; Register_BIT_Counter < 16; Register_BIT_Counter++) // SHIFT AND CHECK EACH BIT, IGNORE READ ONLY BITS 
+							{
+								Received_Data_Backup = Received_PC_Data & 0x01;
+								if (Received_Data_Backup == 1) 
+									{
+										switch (Register_BIT_Counter) 
+											{
+												case 0x0: 
+														Reset_All_Errors = TRUE;
+													break;
+												default:
+													
+													break;
+											}
+									}
+								else 
+									{
+										switch (Register_BIT_Counter) 
+											{
+												default:
+													
+													break;
+											}
+									}
+								Received_PC_Data = Received_PC_Data >> 1;
+							}
+						break;
 					default:
 						Send_Error_Word(UART_Transaction_Error);
 						PIC_PC_ACK = 1;
@@ -870,6 +941,15 @@ BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 						break;
 					case 0x29: // Amplifier pulse mode switches register 
 						Pulse_Mode_Switches_Register_Read = TRUE;
+						break;
+					case 0x2A: // FPGA control register
+						FPGA_Control_Register_Read = TRUE;
+						break;
+					case 0x2B: // Main control register
+						Main_Control_Register_Read = TRUE;
+						break;
+					case 0x2C: // Tissue temperature measurement value register
+						Tissue_Temperature_Measurement_Value_Read = TRUE;
 						break;
 					default:
 						Send_Error_Word(UART_Transaction_Error);
@@ -1122,6 +1202,7 @@ void main (void)
 	int TEC_Voltage_Value = 0, i = 0;
 	int Backup = 0, Backup1 = 0;
 	long Temporary = 0;
+	BOOL DDS_Power_Latch = FALSE;
 
 	InitIO(); // IO INIT
 	Init(); // MAIN SYSTEM INITIALIZATIONS
@@ -1142,7 +1223,42 @@ void main (void)
 	Tempr = Read_From_FPGA(0x9);
 	TEC_Power_Set(250);
 	Tempr = Read_From_FPGA(0x9);
-	Write_To_FPGA(0x2, 0x1);*/
+	Write_To_FPGA(0x2, 0x1);       
+	
+	DDS_Power_On(); */
+	
+	DDS_Power_On();
+	Synthesizer_Device_Init(FALSE);
+	Synthesizer_Device_Init(TRUE);
+	Digital_Potentiometer_Init(FALSE);
+	Digital_Potentiometer_Init(TRUE);
+	
+	DDS1_Frequency_Value = 2000;
+	Backup1 = 560;
+	
+	DDS1_OUT_ON;
+	
+	while (DDS1_Frequency_Value <= 2500)
+			{
+				Frequency_Value_Set((long)((long)DDS1_Frequency_Value * (long)1000), FALSE); // CONVERT THE FREQUENCY TO KILO HERZ 
+				Delay_625US(15); // delay 55 usec
+				
+				while (Backup1 <= 740)
+					{
+						DDS1_Amplitude_Value = Backup1 ;
+						System_Registers_Array[10] = Backup1;
+						DDS1_Amplitude_Value = Swing_Compensation_Table(DDS1_Frequency_Value, DDS1_Amplitude_Value);
+						DDS1_Amplitude_Value = DDS1_Amplitude_Value / 3.0373; // NUMBER TO WORD CONVERTION (CONVERT TO VOLTS AND DIVIDE TO THE STEP) VALUE / 1000 / 0.0209803 = WORD
+						Update_Wiper_Position(DDS1_Amplitude_Value, FALSE); // COMPENSATION OF THE QUANTIZATION MISTAKE		
+						
+						DDS1_Amplitude_Measure = TRUE;
+						Backup = Output_Amplitude_Measure(FALSE, FALSE);
+						
+						Backup1 = Backup1 + 40;
+					}
+				Backup1 = 100;
+				DDS1_Frequency_Value = DDS1_Frequency_Value + 100;
+			}
 	
 	while (1)
 	{
@@ -1198,14 +1314,19 @@ void main (void)
 				
 				if (DDS1_2_POWER_ON_OFF) 
 					{
-						DDS_Power_On();
-						Synthesizer_Device_Init(FALSE);
-						Synthesizer_Device_Init(TRUE);
-						Digital_Potentiometer_Init(FALSE);
-						Digital_Potentiometer_Init(TRUE);
+						if (DDS_Power_Latch)
+							{
+								DDS_Power_Latch = FALSE;
+								DDS_Power_On();
+								Synthesizer_Device_Init(FALSE);
+								Synthesizer_Device_Init(TRUE);
+								Digital_Potentiometer_Init(FALSE);
+								Digital_Potentiometer_Init(TRUE);
+							}
 					}
 				else
 					{
+						DDS_Power_Latch = TRUE;
 						DDS_Power_Off();
 					}
 					
@@ -1355,7 +1476,7 @@ void main (void)
 					{
 						DDS1_Frequency_Set = FALSE;
 					//	Backup = System_Registers_Array[8];
-					//	DDS1_Frequency_Value = Clear_Headers_From_The_Word(System_Registers_Array[8]);
+						DDS1_Frequency_Value = System_Registers_Array[8];
 					//	System_Registers_Array[8] = Backup;
 						Frequency_Value_Set((long)((long)System_Registers_Array[8] * (long)1000), FALSE); // CONVERT THE FREQUENCY TO KILO HERZ 
 					}
@@ -1367,16 +1488,26 @@ void main (void)
 					//	DDS1_Amplitude_Value = Clear_Headers_From_The_Word(System_Registers_Array[10]);
 					//	System_Registers_Array[10] = Backup;
 						DDS1_Amplitude_Value = Swing_Compensation_Table(DDS1_Frequency_Value, System_Registers_Array[10]);
-						DDS1_Amplitude_Value = DDS1_Amplitude_Value / 30.373; // NUMBER TO WORD CONVERTION (CONVERT TO VOLTS AND DIVIDE TO THE STEP) VALUE / 1000 / 0.0209803 = WORD
+						DDS1_Amplitude_Value = DDS1_Amplitude_Value / 3.0373; // NUMBER TO WORD CONVERTION (CONVERT TO VOLTS AND DIVIDE TO THE STEP) VALUE / 1000 / 0.0209803 = WORD
 				
 						Update_Wiper_Position(DDS1_Amplitude_Value, FALSE); // COMPENSATION OF THE QUANTIZATION MISTAKE
 					}
+					
+				/*if (DDS1_Amplitude_Set) 
+					{
+						DDS1_Amplitude_Set = FALSE;
+						DDS1_Amplitude_Value = Swing_Compensation_Table(DDS1_Frequency_Value, System_Registers_Array[10]);
+						DDS1_Amplitude_Value = DDS1_Amplitude_Value * 10;
+						DDS1_Amplitude_Value = DDS1_Amplitude_Value / 30.373; // NUMBER TO WORD CONVERTION (CONVERT TO VOLTS AND DIVIDE TO THE STEP) VALUE / 1000 / 0.0209803 = WORD
+				
+						Update_Wiper_Position((char)DDS1_Amplitude_Value, FALSE); // COMPENSATION OF THE QUANTIZATION MISTAKE
+					}*/
 					
 				if (DDS2_Frequency_Set) 
 					{
 						DDS2_Frequency_Set = FALSE;
 					//	Backup = System_Registers_Array[13];
-					//	DDS2_Frequency_Value = Clear_Headers_From_The_Word(System_Registers_Array[13]);
+						DDS2_Frequency_Value = System_Registers_Array[13];
 					//	System_Registers_Array[13] = Backup;
 						Frequency_Value_Set((long)((long)System_Registers_Array[13] * (long)1000), TRUE); // CONVERT THE FREQUENCY TO KILO HERZ 
 					}
@@ -1388,7 +1519,7 @@ void main (void)
 					//	DDS2_Amplitude_Value = Clear_Headers_From_The_Word(System_Registers_Array[15]);
 					//	System_Registers_Array[15] = Backup;
 						DDS2_Amplitude_Value = Swing_Compensation_Table(DDS2_Frequency_Value, System_Registers_Array[15]);
-						DDS2_Amplitude_Value = DDS2_Amplitude_Value / 30.373; // NUMBER TO WORD CONVERTION (CONVERT TO VOLTS AND DIVIDE TO THE STEP) VALUE / 1000 / 0.0209803 = WORD
+						DDS2_Amplitude_Value = DDS2_Amplitude_Value / 3.0373; // NUMBER TO WORD CONVERTION (CONVERT TO VOLTS AND DIVIDE TO THE STEP) VALUE / 1000 / 0.0209803 = WORD
 				
 						Update_Wiper_Position(DDS2_Amplitude_Value, TRUE); // COMPENSATION OF THE QUANTIZATION MISTAKE
 					}
@@ -1408,6 +1539,26 @@ void main (void)
 						Amplifier_Pulse_Mode_Switches_Value = System_Registers_Array[41];
 						if (!Amplifier_Pulse_Mode_Convertion_Table(Amplifier_Pulse_Mode_Switches_Value)) Send_Error_Word(Amplifier_Pulse_Mode_Word_Error);
 					}
+					
+				if (FPGA_Control_Register)
+					{
+						FPGA_Control_Register = FALSE;
+						if (!Tissue_Temperature_Measure()) Send_Error_Word(Tissue_temperature_measure_Error); // RUN TISSUE TEMPERATURE MEASUREMENT FUNCTION
+						System_Registers_Array[44] = 0;
+						System_Registers_Array[44] = (System_Registers_Array[44] | Read_From_FPGA(0x7)) << 8; // READ MSB VALUE
+						System_Registers_Array[44] = (System_Registers_Array[44] | Read_From_FPGA(0x5)); // READ LSB VALUE
+					}
+				
+				if (Reset_All_Errors)
+					{
+						Reset_All_Errors = FALSE;
+						Error1_Register = 0; // ZEROIZE ERROR1 REGISTER
+						Error2_Register = 0; // ZEROIZE ERROR2 REGISTER	
+						System_Registers_Array[42] = 0xFFC1; // ZEROIZE RELEVANT BITS AT FPGA CONTROL REGISTER
+						Write_To_FPGA(0x2, 0x1); // RESET FPGA ERRORS
+						System_Registers_Array[43] = 0xFFFE; // CLEAR RESET ALL ERRORS BIT
+					}
+				
 				Interrupt_Signal_Strobe();
 				PIC_PC_ACK = 1;
 			}
@@ -1490,11 +1641,11 @@ void main (void)
 			
 		if (DDS1_Amplitude_Measure) 
 			{
-				Tempr = Output_Amplitude_Measure(FALSE, FALSE);
+				Backup = Output_Amplitude_Measure(FALSE, FALSE);
 				DDS1_Amplitude_Measure = FALSE;
-				if (Validate_Amplitude_Setting(Tempr, FALSE))
+				if (Validate_Amplitude_Setting(Backup, FALSE))
 					{
-						if (!Transmitt_To_PC(Tempr)) Send_Error_Word(UART_Transmitter_Error);
+						if (!Transmitt_To_PC(Backup)) Send_Error_Word(UART_Transmitter_Error);
 					}
 				else Send_Error_Word(DDS1_Amplitude_Error);
 			}
@@ -1540,11 +1691,11 @@ void main (void)
 			
 		if (DDS2_Amplitude_Measure) 
 			{
-				Tempr = Output_Amplitude_Measure(TRUE, FALSE);
+				Backup = Output_Amplitude_Measure(TRUE, FALSE);
 				DDS2_Amplitude_Measure = FALSE;
-				if (Validate_Amplitude_Setting(Tempr, TRUE))
+				if (Validate_Amplitude_Setting(Backup, TRUE))
 					{
-						if (!Transmitt_To_PC(Tempr)) Send_Error_Word(UART_Transmitter_Error);
+						if (!Transmitt_To_PC(Backup)) Send_Error_Word(UART_Transmitter_Error);
 					}
 				else Send_Error_Word(DDS2_Amplitude_Error);
 			}
@@ -1552,6 +1703,7 @@ void main (void)
 		if (Amplifier1_Control_Register_Read) 
 			{
 				Amplifier1_Control_Register_Read = FALSE;
+				if (!Transmitt_To_PC(System_Registers_Array[17])) Send_Error_Word(UART_Transmitter_Error);
 			}
 			
 		if (Amplifier1_Temperature_Read) 
@@ -1577,6 +1729,7 @@ void main (void)
 		if (Amplifier2_Control_Register_Read) 
 			{
 				Amplifier2_Control_Register_Read = FALSE;
+				if (!Transmitt_To_PC(System_Registers_Array[22])) Send_Error_Word(UART_Transmitter_Error);
 			}
 			
 		if (Amplifier2_Temperature_Read) 
@@ -1645,8 +1798,8 @@ void main (void)
 			{
 				TEC_Voltage_Measure = FALSE;
 				Voltage_Domain_Read(HP_TEC_Power_SNS, HPTEC_Att_Coefficient);
-			}
-			
+			}	
+		
 		if (Errors1_Register_Read) 
 			{
 				Errors1_Register_Read = FALSE;
@@ -1682,6 +1835,30 @@ void main (void)
 			{
 				Pulse_Mode_Switches_Register_Read = FALSE;
 				if (!Transmitt_To_PC(System_Registers_Array[41])) Send_Error_Word(UART_Transmitter_Error);	
+			}
+			
+		if (Main_Control_Register_Read) 
+			{
+				Main_Control_Register_Read = FALSE;
+				if (!Transmitt_To_PC(System_Registers_Array[43])) Send_Error_Word(UART_Transmitter_Error);
+			}		
+		
+		if (FPGA_Control_Register_Read)
+			{
+				FPGA_Control_Register_Read = FALSE;
+				if (!Transmitt_To_PC(System_Registers_Array[42])) Send_Error_Word(UART_Transmitter_Error);	
+			}
+		if (FPGA_Interrupt_Flag)
+			{
+				FPGA_Interrupt_Flag = FALSE;
+				FPGA_Interrupt_Parsing();
+				Main_Interrupt_Detection_Enable;	
+			}
+			
+		if (Tissue_Temperature_Measurement_Value_Read)
+			{
+				Tissue_Temperature_Measurement_Value_Read = FALSE;
+				if (!Transmitt_To_PC(System_Registers_Array[44])) Send_Error_Word(UART_Transmitter_Error);	
 			}
 	}
 	
