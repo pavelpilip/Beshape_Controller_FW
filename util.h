@@ -29,6 +29,10 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 	// #define Total_Signal_Gain 4.65
 /*****************************************************************************************/
 
+/*************************************GLOBAL COMPILATION PARAMETERS********************/	
+//	#define Voltage_Domain_Validation_Enable_Flag
+/*****************************************************************************************/
+	
 /*************************************SYSTEM VOLTAGE DOMAINS MEASUREMENT PARAMETERS********************/
 	#define P3V3_Resistor_Divider 0.68
 	#define P5V_Resistor_Divider 0.5
@@ -39,6 +43,14 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 	#define P150V_Resistor_Divider 0.01666
 	#define P48V_Resistor_Divider 0.05
 	#define HPTEC_Att_Coefficient 0.35
+	#define Amplifier1_Temperature_Attenuator 0.843
+	#define Amplifier1_Current_Attenuator 1.5
+	#define Amplifier1_Reverse_Power_Attenuator 0.742
+	#define Amplifier1_Forward_Power_Attenuator 0.742
+	#define Amplifier2_Current_Attenuator 1.5
+	#define Amplifier2_Reverse_Power_Attenuator 0.742
+	#define Amplifier2_Forward_Power_Attenuator 0.742
+	#define Vacuum_Pressure_Attenuator 0.61
 	
 /*****************************************************************************************/
 
@@ -193,6 +205,7 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 	#define Parser_Working_Error 0x16
 	#define Pulser_IC_Error 0x17
 	#define Tissue_temperature_measure_Error 0x18
+	#define Amplifier_CW_Mode_Word_Error 0x19
 	
 // ANALOG INPUTS
 
@@ -375,8 +388,8 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 
 	#define POWER_ON PORTEbits.RE1
 	#define tris_POWER_ON TRISEbits.TRISE1
-	#define PS_24V_VAC_EN PORTFbits.RF4
-	#define tris_PS_24V_VAC_EN TRISFbits.TRISF4
+	#define PS_24V_VAC_EN PORTKbits.RK1
+	#define tris_PS_24V_VAC_EN TRISKbits.TRISK1
 	#define PS_48V_EN PORTLbits.RL3
 	#define tris_PS_48V_EN TRISLbits.TRISL3
 	
@@ -527,7 +540,7 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 							IPR1bits.SSP1IP = 1; \
 							PIE1bits.SSP1IE = 0;
 							
-// UART INTERFACE SIGNALS
+// UART1 INTERFACE SIGNALS
 
 	#define Transmit_Control_Register TXSTA1
 	#define Receive_Control_Register RCSTA1
@@ -568,6 +581,25 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 							IPR1bits.RC1IP = 1; \
 							PIE1bits.RC1IE = 0;
 							
+// UART2 INTERFACE SIGNALS
+
+	#define Transmit1_Control_Register TXSTA2
+	#define Baud_Rate_Control1 BAUDCON2
+	#define Baud_Rate_Generator1 SPBRG2
+	#define Baud_Rate_Generator_High1 SPBRGH2
+	#define UART1_Data_Transmit TXREG2
+	
+	#define UART1_Enable RCSTA2bits.SPEN = 1;
+	#define UART1_Disable RCSTA2bits.SPEN = 0;
+	
+	#define UART1_Transmit_Enable TXSTA2bits.TXEN = 1;
+	#define UART1_Transmit_Disable TXSTA2bits.TXEN = 0;
+	
+	#define UART1_Transmit_Data_Idle_High BAUDCON2bits.TXCKP = 0;
+	#define UART1_Transmit_Data_Idle_Low BAUDCON2bits.TXCKP = 1;
+	
+	#define UART1_Transmit_Ready TXSTA2bits.TRMT // "1" - TRANSMISSION SHIFT REGISTER IS EMPTY, READY FOR NEXT BYTE TRANSMISSION 
+	
 // A2D INTERFACE SIGNALS
 
 	#define A2D_Module_Enable ADCON1Hbits.ADON = 1;

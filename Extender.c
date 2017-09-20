@@ -101,16 +101,20 @@ void Extender_Init(char Extender_Number)
 	switch (Extender_Number) // OPEN THE RELEVANT ADC INPUT
 		{
 			case Expander_A_SPI: 
-				Write_To_Extender(Extender_Number, 0x00, 0xDF); // ALL PORT ARE INPUTS, OUTSIDE PORT GPA5
+				Write_To_Extender(Extender_Number, 0x00, 0xCF); // ALL PORT ARE INPUTS, OUTSIDE PORT GPA5, GPA4
 				Write_To_Extender(Extender_Number, 0x01, 0xF9); // ALL PORT ARE INPUTS, OUTSIDE PORT GPB1, GPB2
 				Write_To_Extender(Extender_Number, 0x02, 0x00); // DON'T INVERT INPUTS
 				Write_To_Extender(Extender_Number, 0x03, 0x00); // DON'T INVERT INPUTS
-				Write_To_Extender(Extender_Number, 0x04, 0x5F); // ENABLE FOR INTERRUPT AT CHANGE, OUTSIDE PORT GPA5, GPA7
+				Write_To_Extender(Extender_Number, 0x04, 0x0F); // ENABLE FOR INTERRUPT AT CHANGE, OUTSIDE PORT GPA7, GPA6, GPA5, GPA4
 				Write_To_Extender(Extender_Number, 0x05, 0xF9); // ENABLE FOR INTERRUPT AT CHANGE, OUTSIDE PORT GPB1, GPB2
 				Write_To_Extender(Extender_Number, 0x08, 0x00); // INTERRUPT OCCURS, WHEN CURRENT VALUE IS DIFFERENT FROM THE PREVIOUS VALUE
 				Write_To_Extender(Extender_Number, 0x09, 0x00); // INTERRUPT OCCURS, WHEN CURRENT VALUE IS DIFFERENT FROM THE PREVIOUS VALUE
-				Write_To_Extender(Extender_Number, 0x0C, 0xDF); // PULL UP, ARE ENABLED FOR ALL PORTS, OUTSIDE PORT GPA5
+				Write_To_Extender(Extender_Number, 0x0C, 0xCF); // PULL UP, ARE ENABLED FOR ALL PORTS, OUTSIDE PORT GPA5, GPA4
 				Write_To_Extender(Extender_Number, 0x0D, 0xF9); // PULL UP, ARE ENABLED FOR ALL PORTS, OUTSIDE PORT GPB1, GPB2
+				Write_To_Extender(Extender_Number, 0x12, 0xCF); // CONFIGURE FPGA RESET AND PULSER CONTROL SIGNAL TO "0"
+				Write_To_Extender(Extender_Number, 0x13, 0xF9); // CONFIGURE AMPLIFIER SWITCHES CONTROL SIGNALS TO "0"
+				Write_To_Extender(Extender_Number, 0x14, 0xCF); // CONFIGURE FPGA RESET AND PULSER CONTROL SIGNAL TO "0"
+				Write_To_Extender(Extender_Number, 0x15, 0xF9); // CONFIGURE AMPLIFIER SWITCHES CONTROL SIGNALS TO "0"
 				Extender_Interrupt_Clear(Extender_Number);
 				break;
 			case Expander_B_SPI: 
@@ -149,15 +153,15 @@ void Extender_Init(char Extender_Number)
 				Extender_Interrupt_Clear(Extender_Number);
 				break;
 			default:
-				Write_To_Extender(Extender_Number, 0x00, 0xDF); // ALL PORT ARE INPUTS, OUTSIDE PORT GPA5
+				Write_To_Extender(Extender_Number, 0x00, 0xCF); // ALL PORT ARE INPUTS, OUTSIDE PORT GPA5, GPA4
 				Write_To_Extender(Extender_Number, 0x01, 0xF9); // ALL PORT ARE INPUTS, OUTSIDE PORT GPB1, GPB2
 				Write_To_Extender(Extender_Number, 0x02, 0x00); // DON'T INVERT INPUTS
 				Write_To_Extender(Extender_Number, 0x03, 0x00); // DON'T INVERT INPUTS
-				Write_To_Extender(Extender_Number, 0x04, 0x5F); // ENABLE FOR INTERRUPT AT CHANGE, OUTSIDE PORT GPA5, GPA7
+				Write_To_Extender(Extender_Number, 0x04, 0x4F); // ENABLE FOR INTERRUPT AT CHANGE, OUTSIDE PORT GPA5, GPA7, GPA4
 				Write_To_Extender(Extender_Number, 0x05, 0xF9); // ENABLE FOR INTERRUPT AT CHANGE, OUTSIDE PORT GPB1, GPB2
 				Write_To_Extender(Extender_Number, 0x08, 0x00); // INTERRUPT OCCURS, WHEN CURRENT VALUE IS DIFFERENT FROM THE PREVIOUS VALUE
 				Write_To_Extender(Extender_Number, 0x09, 0x00); // INTERRUPT OCCURS, WHEN CURRENT VALUE IS DIFFERENT FROM THE PREVIOUS VALUE
-				Write_To_Extender(Extender_Number, 0x0C, 0xDF); // PULL UP, ARE ENABLED FOR ALL PORTS, OUTSIDE PORT GPA5
+				Write_To_Extender(Extender_Number, 0x0C, 0xCF); // PULL UP, ARE ENABLED FOR ALL PORTS, OUTSIDE PORT GPA5, GPA4
 				Write_To_Extender(Extender_Number, 0x0D, 0xF9); // PULL UP, ARE ENABLED FOR ALL PORTS, OUTSIDE PORT GPB1, GPB2
 				Extender_Interrupt_Clear(Extender_Number);
 				break;

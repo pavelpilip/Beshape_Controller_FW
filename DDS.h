@@ -20,5 +20,5 @@ int Get_Amplitude_Value(BOOL DDS_Number, BOOL Before_After_Switch);
 
 int Output_Amplitude_Measure(BOOL DDS_Number, BOOL Before_After_Switch);
 
-BOOL Validate_Amplitude_Setting(int Value, BOOL DDS_Number);
+BOOL Validate_Amplitude_Setting(float Value, BOOL DDS_Number);
 	

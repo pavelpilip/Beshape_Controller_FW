@@ -26,6 +26,8 @@
 
 #include "Pseudo_SPI.h"
 
+#include "Amplifier.h"
+
 /////////////////////REGISTERS BITS FLAGS MODULE BEGIN///////////////////////////////
 									
 BOOL POWER_24V_VAC_EN = FALSE, POWER_48V_EN = FALSE, DDS1_2_POWER_ON_OFF = FALSE, DDS1_OUTPUT_ENABLE_DISABLE = FALSE, DDS1_HW_RESET = FALSE;
@@ -47,11 +49,12 @@ BOOL CW_Mode_Switches_Register_Read = FALSE, Pulse_Mode_Switches_Register_Read =
 BOOL Main_Control_Register_Read = FALSE, Tissue_Temperature_Measurement_Value_Read = FALSE, FPGA_Control_Register = FALSE, FPGA_Control_Register_Read = FALSE;
 
 BOOL UART_Communication_Flag = FALSE, UART_Timeout = FALSE;
+
 char MSB_Byte = 0, LSB_Byte = 0, FPGA_Version_Number = 0;
 
 /////////////////////REGISTERS BITS FLAGS MODULE END///////////////////////////////
 
-extern BOOL Data_Receive_Error;//, UART_Communication_Flag, UART_Timeout;
+extern Data_Receive_Error;//, UART_Communication_Flag, UART_Timeout;
 extern Frequency_Measurement_Completed;
 
 BOOL PC_Word_Detected = FALSE, Read_Write_Transaction = FALSE;
@@ -61,7 +64,9 @@ char System_Work_Mode = System_Idle_Mode;
 int Error1_Register = 0, Error2_Register = 0, Received_PC_Data = 0, System_Registers_Array[System_Registers_Number] = {0};
 int DDS1_Frequency_Value = 0, DDS2_Frequency_Value = 0, DDS1_Amplitude_Value = 0, DDS2_Amplitude_Value = 0, Timeout_Counter = 0, A2D_Sine_Amplitude_Timeout_Counter = 0;
 int Amplifier_CW_Mode_Switches_Value = 0, Amplifier_Pulse_Mode_Switches_Value = 0;
+
 //float DDS1_Amplitude_Value = 0;
+float A2D_Calculated_Value = 0;
 
 #pragma interrupt high_priority_interrupt
 void high_priority_interrupt (void)
@@ -202,6 +207,10 @@ void Init(void) // INITIALIZATION OF SYSTEM
 	InitTimer3INTMode();
 	InitTimer5INTMode();
 	Init_UART();
+	Init_Debug_UART();
+	
+	DEBUG_PRINT_STRING("INITIALIZING...\r");
+	
 	Init_ADC();
 	
 	PIC_SPI_Enable; // ENABLE SPI BUS
@@ -218,9 +227,9 @@ void Init(void) // INITIALIZATION OF SYSTEM
 	System_Power_Init();
 	TEC_Power_Init();
 	
-	FPGA_Version_Number = Read_From_FPGA(0x9);
-	
 	Delay_6_25US(9); // delay 55 usec
+	
+	DEBUG_PRINT_STRING("INITIALIZATION COMPLETED\r");
 }
 
 void Interrupt_Signal_Strobe() // STROBE INTERRUPT SIGNAL
@@ -310,6 +319,10 @@ void Send_Error_Word(int Error)
 				Error1_Register = Error1_Register | 0x40; // PARSER ERROR BIT
 				Test_LED_Operation(2, TRUE);
 			break;
+			case Amplifier_CW_Mode_Word_Error: 
+				Error1_Register = Error1_Register | 0x80; // SET AMPLIFIER CW MODE WORD ERROR BIT
+				Test_LED_Operation(2, TRUE);
+			break;
 			case UART_Transmitter_Error: 
 				Error1_Register = Error1_Register | 0x100; // SET UART TRANSMITTER ERROR BIT
 				Test_LED_Operation(2, TRUE);
@@ -339,7 +352,7 @@ void Send_Error_Word(int Error)
 				Test_LED_Operation(2, TRUE);
 			break;
 			case Amplifier_Pulse_Mode_Word_Error: 
-				Error2_Register = Error2_Register | 0x04; // SET A2D CONVERSION ERROR BIT
+				Error2_Register = Error2_Register | 0x04; // SET AMPLIFIER PULSE MODE WORD ERROR BIT
 				Test_LED_Operation(2, TRUE);
 			break;
 			case P3V3_Domain_Error: 
@@ -386,17 +399,27 @@ void Send_Error_Word(int Error)
 													
 			break;
 		}
+	System_Registers_Array[36] = Error1_Register;
+	System_Registers_Array[39] = Error2_Register;
 	Interrupt_Signal_Strobe();
 }
-      			
+ 
+BOOL ACK_To_PC(char Value) // 0x55 - TRANSACTION OK, 0xAA - TRANSACTION ERROR
+{
+	if (!Write_To_PC(Value)) return (FALSE);
+	else return (TRUE);
+}
+ 
 BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 {
-	unsigned char Tmp = 0, Register_BIT_Counter = 0;
+	unsigned char Tmp = 0, Register_BIT_Counter = 0, Tmp1 = 0;
 	int Received_Data_Backup = 0;
 	
 /////////////////DETECT THE RECEIVED WORD IS TYPE MODULE BEGIN/////////////////////////	
 	
 	Test_LED_Operation(1, TRUE); // POWER ON COMMUNICATION OPERATION LED
+	
+	Tmp1 = Word;
 	
 	Tmp = Word >> 6;
 	Word = Word & 0x3F; // CUT HEADER BITS
@@ -409,7 +432,22 @@ BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 							Received_PC_Data = Word;
 							Received_PC_Data = Received_PC_Data << 6;
 							PC_Transaction_Counter ++;
+							
+							DEBUG_PRINT_STRING("DATA1 VALUE BEFORE HEADERS CUT: ");
+							DEBUG_PRINT_VARIABLE(Tmp1);
+							DEBUG_PRINT_STRING("\r");
+							
+							DEBUG_PRINT_STRING("DATA1 VALUE AFTER HEADERS CUT: ");
+							DEBUG_PRINT_VARIABLE(Received_PC_Data);
+							DEBUG_PRINT_STRING("\r");
+							
 							PIC_PC_ACK = 1;
+							if (!ACK_To_PC(0x55)) 
+								{
+									Send_Error_Word(UART_Receiver_Error);
+									DEBUG_PRINT_STRING("DATA1 ACK WAS SENT UNSUCCESSFULLY\r");
+								}
+							else DEBUG_PRINT_STRING("DATA1 ACK WAS SENT SUCCESSFULLY\r");
 							return (TRUE);
 						}
 					if (PC_Transaction_Counter == 3) 
@@ -417,13 +455,32 @@ BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 							Received_PC_Data = Received_PC_Data | Word; 
 							PC_Transaction_Counter = 1;
 							PC_Transaction_Completed = TRUE;
+							
+							DEBUG_PRINT_STRING("DATA2 VALUE BEFORE HEADERS CUT: ");
+							DEBUG_PRINT_VARIABLE(Tmp1);
+							DEBUG_PRINT_STRING("\r");
+							
+							DEBUG_PRINT_STRING("DATA2 VALUE AFTER HEADERS CUT: ");
+							DEBUG_PRINT_VARIABLE(Received_PC_Data);
+							DEBUG_PRINT_STRING("\r");
 						}
 				}
 			else 
 				{
 					Send_Error_Word(Word_Format_Error);
+					DEBUG_PRINT_STRING("WORD FORMAT ERROR DETECTED DURING DATA PARSING\r");
+					
+					DEBUG_PRINT_STRING("ERROR DATA VALUE BEFORE HEADERS CUT: ");
+					DEBUG_PRINT_VARIABLE(Tmp1);
+					DEBUG_PRINT_STRING("\r");
+									
+					DEBUG_PRINT_STRING("ERROR DATA VALUE AFTER HEADERS CUT: ");
+					DEBUG_PRINT_VARIABLE(Word);
+					DEBUG_PRINT_STRING("\r");
 					PIC_PC_ACK = 1;
+					if (!ACK_To_PC(0xAA)) Send_Error_Word(UART_Receiver_Error);
 					Test_LED_Operation(1, FALSE); // POWER OFF COMMUNICATION OPERATION LED
+					PC_Transaction_Counter = 1;
 					return (FALSE);
 				}
 		}
@@ -434,14 +491,43 @@ BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 					Received_Transaction_Address = Word;
 					Read_Write_Transaction = FALSE;
 					PC_Transaction_Counter ++;
+					
+					DEBUG_PRINT_STRING("WRITE TO ADDRESS BEFORE HEADERS CUT: ");
+					DEBUG_PRINT_VARIABLE(Tmp1);
+					DEBUG_PRINT_STRING("\r");
+					
+					DEBUG_PRINT_STRING("WRITE TO ADDRESS AFTER HEADERS CUT: ");
+					DEBUG_PRINT_VARIABLE(Received_Transaction_Address);
+					DEBUG_PRINT_STRING("\r");
+					
+				/*	if (PC_Transaction_Counter == 1)
+						while(1);*/
+					
 					PIC_PC_ACK = 1;
+					if (!ACK_To_PC(0x55)) 
+						{
+							Send_Error_Word(UART_Receiver_Error);
+							DEBUG_PRINT_STRING("ADDRESS WRITE ACK WAS SENT UNSUCCESSFULLY\r");
+						}
+					else DEBUG_PRINT_STRING("ADDRESS WRITE ACK WAS SENT SUCCESSFULLY\r");
 					return (TRUE);
 				}
 			else 
 				{
 					Send_Error_Word(Word_Format_Error);
+					DEBUG_PRINT_STRING("WORD FORMAT ERROR DETECTED DURING ADDRESS WRITE PARSING\r");
+					
+					DEBUG_PRINT_STRING("ERROR DATA VALUE BEFORE HEADERS CUT: ");
+					DEBUG_PRINT_VARIABLE(Tmp1);
+					DEBUG_PRINT_STRING("\r");
+									
+					DEBUG_PRINT_STRING("ERROR DATA VALUE AFTER HEADERS CUT: ");
+					DEBUG_PRINT_VARIABLE(Word);
+					DEBUG_PRINT_STRING("\r");
 					PIC_PC_ACK = 1;
+					if (!ACK_To_PC(0xAA)) Send_Error_Word(UART_Receiver_Error);
 					Test_LED_Operation(1, FALSE); // POWER OFF COMMUNICATION OPERATION LED
+					PC_Transaction_Counter = 1;
 					return (FALSE);
 				}
 		}
@@ -451,20 +537,50 @@ BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 				{
 					Received_Transaction_Address = Word;
 					Read_Write_Transaction = TRUE;
+					
+					DEBUG_PRINT_STRING("READ FROM ADDRESS BEFORE HEADERS CUT: ");
+					DEBUG_PRINT_VARIABLE(Tmp1);
+					DEBUG_PRINT_STRING("\r");
+					
+					DEBUG_PRINT_STRING("READ FROM ADDRESS AFTER HEADERS CUT: ");
+					DEBUG_PRINT_VARIABLE(Received_Transaction_Address);
+					DEBUG_PRINT_STRING("\r");
 				}
 			else 
 				{
 					Send_Error_Word(Word_Format_Error);
+					DEBUG_PRINT_STRING("WORD FORMAT ERROR DETECTED DURING ADDRESS READ PARSING\r");
+					
+					DEBUG_PRINT_STRING("ERROR DATA VALUE BEFORE HEADERS CUT: ");
+					DEBUG_PRINT_VARIABLE(Tmp1);
+					DEBUG_PRINT_STRING("\r");
+									
+					DEBUG_PRINT_STRING("ERROR DATA VALUE AFTER HEADERS CUT: ");
+					DEBUG_PRINT_VARIABLE(Word);
+					DEBUG_PRINT_STRING("\r");
 					PIC_PC_ACK = 1;
+					if (!ACK_To_PC(0xAA)) Send_Error_Word(UART_Receiver_Error);
 					Test_LED_Operation(1, FALSE); // POWER OFF COMMUNICATION OPERATION LED
+					PC_Transaction_Counter = 1;
 					return (FALSE);
 				}
 		}
 	else 
 		{
 			Send_Error_Word(Word_Format_Error);
+			DEBUG_PRINT_STRING("WORD FORMAT ERROR DETECTED BEFORE ADDRESS PARSED \r");
+			
+			DEBUG_PRINT_STRING("ERROR DATA VALUE BEFORE HEADERS CUT: ");
+			DEBUG_PRINT_VARIABLE(Tmp1);
+			DEBUG_PRINT_STRING("\r");
+							
+			DEBUG_PRINT_STRING("ERROR DATA VALUE AFTER HEADERS CUT: ");
+			DEBUG_PRINT_VARIABLE(Word);
+			DEBUG_PRINT_STRING("\r");
 			PIC_PC_ACK = 1;
+			if (!ACK_To_PC(0xAA)) Send_Error_Word(UART_Receiver_Error);
 			Test_LED_Operation(1, FALSE); // POWER OFF COMMUNICATION OPERATION LED
+			PC_Transaction_Counter = 1;
 			return (FALSE);
 		}
 		
@@ -808,11 +924,22 @@ BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 						break;
 					default:
 						Send_Error_Word(UART_Transaction_Error);
+						DEBUG_PRINT_STRING("UART TRANSACTION ERROR DETECTED\r");
 						PIC_PC_ACK = 1;
+						PC_Transaction_Counter = 1;
+						if (!ACK_To_PC(0xAA)) Send_Error_Word(UART_Receiver_Error);
 						return (FALSE);
 						break;
 				}
 			Test_LED_Operation(1, FALSE); // POWER OFF COMMUNICATION OPERATION LED
+			PC_Transaction_Counter = 1;
+			if (!ACK_To_PC(0x55)) 
+				{
+					Send_Error_Word(UART_Receiver_Error);
+					DEBUG_PRINT_STRING("DATA2 ACK WAS SENT UNSUCCESSFULLY\r");
+				}
+			else DEBUG_PRINT_STRING("DATA2 ACK WAS SENT SUCCESSFULLY\r");
+			DEBUG_PRINT_STRING("ADDRESS WRITE TRANSACTION PARSED SUCCESSFULLY\r");
 			return (TRUE);
 		}
 	else if ((!PC_Transaction_Completed) && (Read_Write_Transaction)) // READ TRANSACTION PARSING
@@ -953,19 +1080,36 @@ BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 						break;
 					default:
 						Send_Error_Word(UART_Transaction_Error);
+						DEBUG_PRINT_STRING("UART TRANSACTION ERROR DETECTED\r");
 						PIC_PC_ACK = 1;
+						PC_Transaction_Counter = 1;
+						if (!ACK_To_PC(0xAA)) Send_Error_Word(UART_Receiver_Error);
 						return (FALSE);
 						break;
 				}
 			Test_LED_Operation(1, FALSE); // POWER OFF COMMUNICATION OPERATION LED
 			PC_Transaction_Counter = 1;
+			if (!ACK_To_PC(0x55)) 
+				{
+					Send_Error_Word(UART_Receiver_Error);
+					DEBUG_PRINT_STRING("ADDRESS READ ACK WAS SENT UNSUCCESSFULLY\r");
+				}
+			else DEBUG_PRINT_STRING("ADDRESS READ ACK WAS SENT SUCCESSFULLY\r");
+			
+			Delay_625US(100); // delay 65 msec
+			
+			DEBUG_PRINT_STRING("ADDRESS READ TRANSACTION PARSED SUCCESSFULLY\r");
+			
 			return (TRUE);
 		}
 	else
 		{
 			Send_Error_Word(Parser_Working_Error);
+			DEBUG_PRINT_STRING("PARSER ERROR DETECTED\r");
 			Test_LED_Operation(1, FALSE); // POWER OFF COMMUNICATION OPERATION LED
 			PIC_PC_ACK = 1;
+			PC_Transaction_Counter = 1;
+			if (!ACK_To_PC(0xAA)) Send_Error_Word(UART_Receiver_Error);
 			return (FALSE);
 		}
 }
@@ -987,7 +1131,14 @@ BOOL Transmitt_To_PC(int Word)
 			{
 				UART_Communication_Flag = FALSE; // FOR DEBUG ONLY
 			//	Timer2Enable; // ENABLE 16 SECONDS TIMER FOR VOLTAGE DOMAINS MEASUREMENT
+				DEBUG_PRINT_STRING("FAILED TO TRANSMITT DATA\r");
 				return (FALSE);
+			}
+		else
+			{
+				DEBUG_PRINT_STRING("MSB BYTE: ");
+				DEBUG_PRINT_VARIABLE(MSB_Byte);
+				DEBUG_PRINT_STRING(" WAS SENT\r");
 			}
 
 /**************************************** FOR DEBUG ONLY ***********************************************/
@@ -1020,6 +1171,7 @@ BOOL Transmitt_To_PC(int Word)
 				if (PC_Received_Word != 0x55) 
 					{
 						UART_Communication_Flag = FALSE;
+						DEBUG_PRINT_STRING("WRONG ACK RECEIVED DURING TRANSMISSION\r");
 					//	Timer2Enable; // ENABLE 16 SECONDS TIMER FOR VOLTAGE DOMAINS MEASUREMENT
 						return (FALSE);
 					}
@@ -1029,6 +1181,7 @@ BOOL Transmitt_To_PC(int Word)
 				Send_Error_Word(UART_Receiver_Error);
 				UART_Communication_Flag = FALSE;
 			//	Timer2Enable; // ENABLE 16 SECONDS TIMER FOR VOLTAGE DOMAINS MEASUREMENT
+				DEBUG_PRINT_STRING("UART RECEIVE ERROR DETECTED\r");
 				return (FALSE);
 			}
 
@@ -1044,7 +1197,14 @@ BOOL Transmitt_To_PC(int Word)
 			{
 				UART_Communication_Flag = FALSE; // FOR DEBUG ONLY
 			//	Timer2Enable; // ENABLE 16 SECONDS TIMER FOR VOLTAGE DOMAINS MEASUREMENT
+				DEBUG_PRINT_STRING("FAILED TO TRANSMITT DATA\r");
 				return (FALSE);
+			}
+		else
+			{
+				DEBUG_PRINT_STRING("LSB BYTE: ");
+				DEBUG_PRINT_VARIABLE(LSB_Byte);
+				DEBUG_PRINT_STRING(" WAS SENT\r");
 			}
 		PIC_PC_ACK = 1;
 		
@@ -1079,6 +1239,7 @@ BOOL Transmitt_To_PC(int Word)
 					{
 						UART_Communication_Flag = FALSE;
 						//Timer2Enable; // ENABLE 16 SECONDS TIMER FOR VOLTAGE DOMAINS MEASUREMENT
+						DEBUG_PRINT_STRING("WRONG ACK RECEIVED DURING TRANSMISSION\r");
 						return (FALSE);
 					}
 			}
@@ -1087,6 +1248,7 @@ BOOL Transmitt_To_PC(int Word)
 				Send_Error_Word(UART_Receiver_Error);
 				UART_Communication_Flag = FALSE;
 				//Timer2Enable; // ENABLE 16 SECONDS TIMER FOR VOLTAGE DOMAINS MEASUREMENT
+				DEBUG_PRINT_STRING("UART RECEIVE ERROR DETECTED\r");
 				return (FALSE);
 			}
 
@@ -1096,6 +1258,7 @@ BOOL Transmitt_To_PC(int Word)
 		EnableIntUART;
 		UART_Communication_Flag = FALSE;
 		//Timer2Enable; // ENABLE 16 SECONDS TIMER FOR VOLTAGE DOMAINS MEASUREMENT
+		DEBUG_PRINT_STRING("A WORD TRANSMITTED SUCCESSFULLY\r");
 		return (TRUE);
 	}
 
@@ -1173,14 +1336,13 @@ BOOL Voltage_Domain_Validate(int Domain) // MONITOR SELECTED SYSTEM VOLTAGE DOMA
 
 void Voltage_Domain_Read(int Domain, float Resistor_Divider_Value)
 {
-	float A2D_Calculated_Value = 0;
 	int Backup = 0;
-	System_Domains_Measure_Enable_Flag = TRUE;
+//	System_Domains_Measure_Enable_Flag = TRUE;
 	A2D_Manual_Convert(Domain);
 	Wait_For_Completion();
 	Backup = A2D_Value_Read(Domain);
 	A2D_Calculated_Value = (Backup * Vref) / (4096 * Resistor_Divider_Value);
-	System_Domains_Measure_Enable_Flag = FALSE;
+//	System_Domains_Measure_Enable_Flag = FALSE;
 	if (!Transmitt_To_PC(A2D_Calculated_Value * 1000)) Send_Error_Word(UART_Transmitter_Error);
 }
 
@@ -1202,15 +1364,30 @@ void main (void)
 	int TEC_Voltage_Value = 0, i = 0;
 	int Backup = 0, Backup1 = 0;
 	long Temporary = 0;
-	BOOL DDS_Power_Latch = FALSE;
+	BOOL DDS_Power_Latch = TRUE;
 
 	InitIO(); // IO INIT
+	PIC_PC_ACK = 0;
 	Init(); // MAIN SYSTEM INITIALIZATIONS
-
-	//EnableIntSPI;
+	System_Work_Mode = System_Idle_Mode;
+	DEBUG_PRINT_STRING("SYSTEM WORKING IN IDLE MODE\r");
 	Powerup_Domains_On();
+	DEBUG_PRINT_STRING("POWER UP DOMAINS ON\r");
 	A2D_Module_Enable;
-//	Timer5Enable;
+	DEBUG_PRINT_STRING("A2D MODULE ENABLE\r");
+	
+	DEBUG_PRINT_STRING("MCU VERSION NUMBER: ");
+	DEBUG_PRINT_VARIABLE(MCU_Version_Number);
+	DEBUG_PRINT_STRING("\r");
+	
+	FPGA_Version_Number = Read_From_FPGA(0x9);
+	DEBUG_PRINT_STRING("FPGA VERSION NUMBER: ");
+	DEBUG_PRINT_VARIABLE(FPGA_Version_Number);
+	DEBUG_PRINT_STRING("\r");
+	
+	#ifdef Voltage_Domain_Validation_Enable_Flag 
+		Timer5Enable;
+	#endif
 
 /*	Tempr = Read_From_Extender(Expander_A_SPI, 0x12); // READ PORT STATUS FROM EXPANDER A
 	Tempr = Read_From_FPGA(0x9);
@@ -1227,38 +1404,64 @@ void main (void)
 	
 	DDS_Power_On(); */
 	
-	DDS_Power_On();
+	/*DDS_Power_On();
 	Synthesizer_Device_Init(FALSE);
 	Synthesizer_Device_Init(TRUE);
 	Digital_Potentiometer_Init(FALSE);
 	Digital_Potentiometer_Init(TRUE);
 	
 	DDS1_Frequency_Value = 2000;
-	Backup1 = 560;
+	DDS1_Amplitude_Value = 150;
+	System_Registers_Array[10] = DDS1_Amplitude_Value;
 	
+	DDS2_Frequency_Value = 2000;
+	DDS2_Amplitude_Value = 250;
+	System_Registers_Array[15] = DDS2_Amplitude_Value;
+
+	Frequency_Value_Set((long)((long)DDS1_Frequency_Value * (long)1000), FALSE); // CONVERT THE FREQUENCY TO KILO HERZ 
+	DDS1_Amplitude_Value = Swing_Compensation_Table(DDS1_Frequency_Value, DDS1_Amplitude_Value);
+	DDS1_Amplitude_Value = DDS1_Amplitude_Value / 3.0373; // NUMBER TO WORD CONVERTION (CONVERT TO VOLTS AND DIVIDE TO THE STEP) VALUE / 1000 / 0.0209803 = WORD
+	Update_Wiper_Position(DDS1_Amplitude_Value, FALSE); // COMPENSATION OF THE QUANTIZATION MISTAKE
+
 	DDS1_OUT_ON;
+
+	Frequency_Value_Set((long)((long)DDS2_Frequency_Value * (long)1000), TRUE); // CONVERT THE FREQUENCY TO KILO HERZ 
+	DDS2_Amplitude_Value = Swing_Compensation_Table(DDS2_Frequency_Value, DDS2_Amplitude_Value);
+	DDS2_Amplitude_Value = DDS2_Amplitude_Value / 3.0373; // NUMBER TO WORD CONVERTION (CONVERT TO VOLTS AND DIVIDE TO THE STEP) VALUE / 1000 / 0.0209803 = WORD
+	Update_Wiper_Position(DDS2_Amplitude_Value, TRUE); // COMPENSATION OF THE QUANTIZATION MISTAKE	
 	
-	while (DDS1_Frequency_Value <= 2500)
-			{
-				Frequency_Value_Set((long)((long)DDS1_Frequency_Value * (long)1000), FALSE); // CONVERT THE FREQUENCY TO KILO HERZ 
-				Delay_625US(15); // delay 55 usec
-				
-				while (Backup1 <= 740)
-					{
-						DDS1_Amplitude_Value = Backup1 ;
-						System_Registers_Array[10] = Backup1;
-						DDS1_Amplitude_Value = Swing_Compensation_Table(DDS1_Frequency_Value, DDS1_Amplitude_Value);
-						DDS1_Amplitude_Value = DDS1_Amplitude_Value / 3.0373; // NUMBER TO WORD CONVERTION (CONVERT TO VOLTS AND DIVIDE TO THE STEP) VALUE / 1000 / 0.0209803 = WORD
-						Update_Wiper_Position(DDS1_Amplitude_Value, FALSE); // COMPENSATION OF THE QUANTIZATION MISTAKE		
-						
-						DDS1_Amplitude_Measure = TRUE;
-						Backup = Output_Amplitude_Measure(FALSE, FALSE);
-						
-						Backup1 = Backup1 + 40;
-					}
-				Backup1 = 100;
-				DDS1_Frequency_Value = DDS1_Frequency_Value + 100;
-			}
+	DDS2_OUT_ON;
+
+	Delay_625US(10000); // delay 55 usec
+	Backup = Output_Amplitude_Measure(FALSE, FALSE);
+	Backup1 = Output_Amplitude_Measure(TRUE, FALSE); */
+	
+	/*DDS_Power_On();
+	Synthesizer_Device_Init(FALSE);
+	Synthesizer_Device_Init(TRUE);
+	Digital_Potentiometer_Init(FALSE);
+	Digital_Potentiometer_Init(TRUE);
+	
+	
+	System_Registers_Array[7] = 3;
+	System_Registers_Array[12] = 2;
+	System_Registers_Array[8] = 1500;
+	System_Registers_Array[10] = 150;	
+	
+	System_Registers_Array[13] = 2500;
+	System_Registers_Array[15] = 250;
+	
+	DDS1_Frequency_Set = TRUE;	
+	DDS1_Amplitude_Set = TRUE; 	
+	DDS2_Frequency_Set = TRUE;	
+	DDS2_Amplitude_Set = TRUE;
+	
+	DDS1_OUTPUT_ENABLE_DISABLE = TRUE;
+	DDS2_OUTPUT_ENABLE_DISABLE = TRUE;
+	PC_Transaction_Completed = TRUE;
+	DDS1_2_POWER_ON_OFF = TRUE;*/
+	
+	PIC_PC_ACK = 1;
 	
 	while (1)
 	{
@@ -1266,29 +1469,68 @@ void main (void)
 		if (PC_Word_Detected) // CHECK FOR UART MODULE ACTIVITY
 			{
 				PC_Word_Detected = FALSE;
+				
 				PC_Received_Word = Read_From_PC();
+				
+				DEBUG_PRINT_STRING("WORD RECEIVED FROM PC\r");
 
 				if (!Data_Receive_Error) PC_Word_Parser(PC_Received_Word);
 				else 
 					{
+						DEBUG_PRINT_STRING("UART RECEIVER ERROR DETECTED\r");
 						Send_Error_Word(UART_Receiver_Error);
 					}
+				UART_INTFLAG = 0;
 				EnableIntUART;
 			}
 
 		if (System_Domains_Measure_Enable_Flag) // SWITCH BETWEEN LESS AND GREATER THEN THRESHOLD VALUE MODULE, VALID ONLY AT IDLE MODE
 			{
-				if (!Voltage_Domain_Validate(P3_3V)) Send_Error_Word(P3V3_Domain_Error);
-				if (!Voltage_Domain_Validate(P5V)) Send_Error_Word(P5V_Domain_Error);
-				if (!Voltage_Domain_Validate(N5V)) Send_Error_Word(N5V_Domain_Error);
-				if (!Voltage_Domain_Validate(P12V)) Send_Error_Word(P12V_Domain_Error);
-				if (!Voltage_Domain_Validate(N12V)) Send_Error_Word(N12V_Domain_Error);
-				if (!Voltage_Domain_Validate(P24V)) Send_Error_Word(P24V_Domain_Error);
-				if (!Voltage_Domain_Validate(P150V)) Send_Error_Word(P150V_Domain_Error);
-				if (!Voltage_Domain_Validate(P48V)) Send_Error_Word(P48V_Domain_Error);
+				if (!Voltage_Domain_Validate(P3_3V)) 
+					{
+						DEBUG_PRINT_STRING("3.3V DOMAIN ERROR\r");
+						Send_Error_Word(P3V3_Domain_Error);
+					}
+				if (!Voltage_Domain_Validate(P5V)) 
+					{
+						DEBUG_PRINT_STRING("5V DOMAIN ERROR\r");
+						Send_Error_Word(P5V_Domain_Error);
+					}
+				if (!Voltage_Domain_Validate(N5V)) 
+					{
+						DEBUG_PRINT_STRING("-5V DOMAIN ERROR\r");
+						Send_Error_Word(N5V_Domain_Error);
+					}
+				if (!Voltage_Domain_Validate(P12V)) 
+					{
+						DEBUG_PRINT_STRING("12V DOMAIN ERROR\r");
+						Send_Error_Word(P12V_Domain_Error);
+					}
+				if (!Voltage_Domain_Validate(N12V)) 
+				{
+						DEBUG_PRINT_STRING("-12V DOMAIN ERROR\r");
+						Send_Error_Word(N12V_Domain_Error);
+					}
+				if (!Voltage_Domain_Validate(P24V)) 
+					{
+						DEBUG_PRINT_STRING("24V DOMAIN ERROR\r");
+						Send_Error_Word(P24V_Domain_Error);
+					}
+				if (!Voltage_Domain_Validate(P150V)) 
+					{
+						DEBUG_PRINT_STRING("150V DOMAIN ERROR\r");
+						Send_Error_Word(P150V_Domain_Error);
+					}
+				if (!Voltage_Domain_Validate(P48V)) 
+					{
+						DEBUG_PRINT_STRING("48V DOMAIN ERROR\r");
+						Send_Error_Word(P48V_Domain_Error);
+					}
 				
 				System_Domains_Measure_Enable_Flag = FALSE;
-//				Timer5Enable;
+				#ifdef Voltage_Domain_Validation_Enable_Flag 
+					Timer5Enable;
+				#endif
 			}
 		
 		if (PC_Transaction_Completed)
@@ -1297,19 +1539,23 @@ void main (void)
 				if (POWER_24V_VAC_EN) 
 					{
 						Domains_Power_Control(PS_24V_VAC, TRUE);
+						DEBUG_PRINT_STRING("24V VACCUM DOMAIN POWER ON\r");
 					}
 				else
 					{
 						Domains_Power_Control(PS_24V_VAC, FALSE);
+						DEBUG_PRINT_STRING("24V VACCUM DOMAIN POWER OFF\r");
 					}
 				
 				if (POWER_48V_EN) 
 					{
 						Domains_Power_Control(PS_48V, TRUE);
+						DEBUG_PRINT_STRING("48V DOMAIN POWER ON\r");
 					}
 				else
 					{
 						Domains_Power_Control(PS_48V, FALSE);
+						DEBUG_PRINT_STRING("48V DOMAIN POWER OFF\r");
 					}
 				
 				if (DDS1_2_POWER_ON_OFF) 
@@ -1322,21 +1568,35 @@ void main (void)
 								Synthesizer_Device_Init(TRUE);
 								Digital_Potentiometer_Init(FALSE);
 								Digital_Potentiometer_Init(TRUE);
+								DEBUG_PRINT_STRING("DDS1_2 MODULES POWER ON\r");
 							}
 					}
 				else
 					{
 						DDS_Power_Latch = TRUE;
 						DDS_Power_Off();
+						System_Registers_Array[8] = 0; // ZEROIZE ALL DDS PARAMETERS
+						System_Registers_Array[10] = 0;	
+						System_Registers_Array[13] = 0;
+						System_Registers_Array[15] = 0;
+						DDS1_Frequency_Value = 0;
+						DDS2_Frequency_Value = 0;
+						DDS1_Amplitude_Value = 0;
+						DDS2_Amplitude_Value = 0;
+						Delay_625US(9);
+						UART_Communication_Reload();
+						DEBUG_PRINT_STRING("DDS1_2 MODULES POWER OFF\r");
 					}
 					
 				if (DDS1_OUTPUT_ENABLE_DISABLE) 
 					{
 						DDS1_OUT_ON;
+						DEBUG_PRINT_STRING("DDS1 OUTPUT ENABLE\r");
 					}
 				else
 					{
 						DDS1_OUT_OFF;
+						DEBUG_PRINT_STRING("DDS1 OUTPUT DISABLE\r");
 					}
 					
 				if (DDS1_HW_RESET) 
@@ -1349,22 +1609,26 @@ void main (void)
 						DDS1_POT_RESETn = 1;
 						Delay_6_25US(7);
 						System_Registers_Array[7] = System_Registers_Array[7] & 0xFEC3; // ZEROIZE DDS1 HARDWARE RESET BIT 
+						DEBUG_PRINT_STRING("DDS1 HARDWARE RESET EXECUTED\r");
 					}
 					
 				if (DDS1_SW_RESET) 
 					{
 						DDS1_SW_RESET = FALSE;
 						DDS1_GEN_FAIL_INT = 0;
-						System_Registers_Array[7] = System_Registers_Array[7] & 0xFDC3; // ZEROIZE DDS1 SOFTWARE RESET BIT 
+						System_Registers_Array[7] = System_Registers_Array[7] & 0xFDC3; // ZEROIZE DDS1 SOFTWARE RESET BIT
+						DEBUG_PRINT_STRING("DDS1 SOFTWARE RESET EXECUTED\r");
 					}
 				
 				if (DDS2_OUTPUT_ENABLE_DISABLE) 
 					{
 						DDS2_OUT_ON;
+						DEBUG_PRINT_STRING("DDS2 OUTPUT ENABLE\r");
 					}
 				else
 					{
 						DDS2_OUT_OFF;
+						DEBUG_PRINT_STRING("DDS2 OUTPUT DISABLE\r");
 					}
 					
 				if (DDS2_HW_RESET) 
@@ -1377,6 +1641,7 @@ void main (void)
 						DDS2_POT_RESETn = 1;
 						Delay_6_25US(7);
 						System_Registers_Array[12] = System_Registers_Array[12] & 0xFEC3; // ZEROIZE DDS2 HARDWARE RESET BIT
+						DEBUG_PRINT_STRING("DDS2 HARDWARE RESET EXECUTED\r");
 					}
 					
 				if (DDS2_SW_RESET) 
@@ -1384,140 +1649,146 @@ void main (void)
 						DDS2_SW_RESET = FALSE;
 						DDS2_GEN_FAIL_INT = 0;
 						System_Registers_Array[12] = System_Registers_Array[12] & 0xFDC3; // ZEROIZE DDS2 SOFTWARE RESET BIT 
+						DEBUG_PRINT_STRING("DDS2 SOFTWARE RESET EXECUTED\r");
 					}
 					
 				if (AMP1_ENABLE) 
 					{
 						AMP_ENABLE = 1;
+						DEBUG_PRINT_STRING("AMPLIFIER1 ENABLED\r");
 					}
 				else
 					{
 						AMP_ENABLE = 0;
+						DEBUG_PRINT_STRING("AMPLIFIER1 DISABLED\r");
 					}
 				
 				if (AMP2_ENABLE) 
 					{
 						AMP_ENABLE2 = 1;
+						DEBUG_PRINT_STRING("AMPLIFIER2 ENABLED\r");
 					}
 				else
 					{
 						AMP_ENABLE2 = 0;
+						DEBUG_PRINT_STRING("AMPLIFIER2 DISABLED\r");
 					}
 					
 				if (VAC_VALVE2_ON_OFF) 
 					{
 						Domains_Power_Control(VAC_VALVE, TRUE);
+						DEBUG_PRINT_STRING("VACCUM VALVE POWER ON\r");
 					}
 				else
 					{
 						Domains_Power_Control(VAC_VALVE, FALSE);
+						DEBUG_PRINT_STRING("VACCUM VALVE POWER OFF\r");
 					}
 					
 				if (HP_TEC_ON_OFF) 
 					{
 						Domains_Power_Control(HP_TEC, TRUE);
+						DEBUG_PRINT_STRING("HP_TEC POWER ON\r");
 					}
 				else
 					{
 						Domains_Power_Control(HP_TEC, FALSE);
+						DEBUG_PRINT_STRING("HP_TEC POWER OFF\r");
 					}
 					
 				if (HP_LED_1) 
 					{
 						Tempr = Read_From_Extender(Expander_C_SPI, 0x12); // READ PORT STATUS FROM EXPANDER C
 						Write_To_Extender(Expander_C_SPI, 0x12, Tempr | 0x10); // SET RELEVANT BIT
-						
+						DEBUG_PRINT_STRING("HP_LED1 ON\r");
 					}
 				else
 					{
 						Tempr = Read_From_Extender(Expander_C_SPI, 0x12); // READ PORT STATUS FROM EXPANDER C
 						Write_To_Extender(Expander_C_SPI, 0x12, Tempr & 0xEF); // CLEAR RELEVANT BIT
+						DEBUG_PRINT_STRING("HP_LED1 OFF\r");
 					}
 					
 				if (HP_LED_2) 
 					{
 						Tempr = Read_From_Extender(Expander_C_SPI, 0x12); // READ PORT STATUS FROM EXPANDER C
 						Write_To_Extender(Expander_C_SPI, 0x12, Tempr | 0x20); // SET RELEVANT BIT
-						
+						DEBUG_PRINT_STRING("HP_LED2 ON\r");
 					}
 				else
 					{
 						Tempr = Read_From_Extender(Expander_C_SPI, 0x12); // READ PORT STATUS FROM EXPANDER C
 						Write_To_Extender(Expander_C_SPI, 0x12, Tempr & 0xDF); // CLEAR RELEVANT BIT
+						DEBUG_PRINT_STRING("HP_LED2 OFF\r");
 					}
 					
 				if (HP_LED_3) 
 					{
 						Tempr = Read_From_Extender(Expander_C_SPI, 0x13); // READ PORT STATUS FROM EXPANDER C
 						Write_To_Extender(Expander_C_SPI, 0x13, Tempr | 0x20); // SET RELEVANT BIT
-						
+						DEBUG_PRINT_STRING("HP_LED3 ON\r");
 					}
 				else
 					{
 						Tempr = Read_From_Extender(Expander_C_SPI, 0x13); // READ PORT STATUS FROM EXPANDER C
 						Write_To_Extender(Expander_C_SPI, 0x13, Tempr & 0xDF); // CLEAR RELEVANT BIT
+						DEBUG_PRINT_STRING("HP_LED3 OFF\r");
 					}
 					
 				if (TEC_Voltage_Set) 
 					{
 						TEC_Voltage_Set = FALSE;
 						
-						//Backup = System_Registers_Array[34];
-				//		TEC_Voltage_Value = Clear_Headers_From_The_Word(System_Registers_Array[34]);
-						//System_Registers_Array[34] = Backup;
 						TEC_Voltage_Value = System_Registers_Array[34];
+						DEBUG_PRINT_STRING("TEC VOLTAGE WAS SET TO VALUE: ");
+						DEBUG_PRINT_VARIABLE(TEC_Voltage_Value);
+						
 						if (!TEC_Power_Set(TEC_Voltage_Value))
 							{
 								Send_Error_Word(TEC_Voltage_Error);
+								DEBUG_PRINT_STRING(" UNSUCCESSFULLY\r");
 							}
+						else DEBUG_PRINT_STRING(" SUCCESSFULLY\r");
 					}
-										
+						
 				if (DDS1_Frequency_Set) 
 					{
 						DDS1_Frequency_Set = FALSE;
-					//	Backup = System_Registers_Array[8];
 						DDS1_Frequency_Value = System_Registers_Array[8];
-					//	System_Registers_Array[8] = Backup;
+						DEBUG_PRINT_STRING("DDS1 FREQUENCY VALUE OF: ");
+						DEBUG_PRINT_VARIABLE(DDS1_Frequency_Value);
+						DEBUG_PRINT_STRING(" WAS SET SUCCESSFULLY\r");
 						Frequency_Value_Set((long)((long)System_Registers_Array[8] * (long)1000), FALSE); // CONVERT THE FREQUENCY TO KILO HERZ 
 					}
 					
 				if (DDS1_Amplitude_Set) 
 					{
 						DDS1_Amplitude_Set = FALSE;
-					//	Backup = System_Registers_Array[10];
-					//	DDS1_Amplitude_Value = Clear_Headers_From_The_Word(System_Registers_Array[10]);
-					//	System_Registers_Array[10] = Backup;
+						DEBUG_PRINT_STRING("DDS1 AMPLITUDE VALUE OF: ");
+						DEBUG_PRINT_VARIABLE(System_Registers_Array[10]);
+						DEBUG_PRINT_STRING(" WAS SET SUCCESSFULLY\r");
 						DDS1_Amplitude_Value = Swing_Compensation_Table(DDS1_Frequency_Value, System_Registers_Array[10]);
 						DDS1_Amplitude_Value = DDS1_Amplitude_Value / 3.0373; // NUMBER TO WORD CONVERTION (CONVERT TO VOLTS AND DIVIDE TO THE STEP) VALUE / 1000 / 0.0209803 = WORD
 				
 						Update_Wiper_Position(DDS1_Amplitude_Value, FALSE); // COMPENSATION OF THE QUANTIZATION MISTAKE
 					}
 					
-				/*if (DDS1_Amplitude_Set) 
-					{
-						DDS1_Amplitude_Set = FALSE;
-						DDS1_Amplitude_Value = Swing_Compensation_Table(DDS1_Frequency_Value, System_Registers_Array[10]);
-						DDS1_Amplitude_Value = DDS1_Amplitude_Value * 10;
-						DDS1_Amplitude_Value = DDS1_Amplitude_Value / 30.373; // NUMBER TO WORD CONVERTION (CONVERT TO VOLTS AND DIVIDE TO THE STEP) VALUE / 1000 / 0.0209803 = WORD
-				
-						Update_Wiper_Position((char)DDS1_Amplitude_Value, FALSE); // COMPENSATION OF THE QUANTIZATION MISTAKE
-					}*/
-					
 				if (DDS2_Frequency_Set) 
 					{
 						DDS2_Frequency_Set = FALSE;
-					//	Backup = System_Registers_Array[13];
 						DDS2_Frequency_Value = System_Registers_Array[13];
-					//	System_Registers_Array[13] = Backup;
+						DEBUG_PRINT_STRING("DDS2 FREQUENCY VALUE OF: ");
+						DEBUG_PRINT_VARIABLE(DDS2_Frequency_Value);
+						DEBUG_PRINT_STRING(" WAS SET SUCCESSFULLY\r");
 						Frequency_Value_Set((long)((long)System_Registers_Array[13] * (long)1000), TRUE); // CONVERT THE FREQUENCY TO KILO HERZ 
 					}
 					
 				if (DDS2_Amplitude_Set) 
 					{
 						DDS2_Amplitude_Set = FALSE;
-					//	Backup = System_Registers_Array[15];
-					//	DDS2_Amplitude_Value = Clear_Headers_From_The_Word(System_Registers_Array[15]);
-					//	System_Registers_Array[15] = Backup;
+						DEBUG_PRINT_STRING("DDS2 AMPLITUDE VALUE OF: ");
+						DEBUG_PRINT_VARIABLE(System_Registers_Array[15]);
+						DEBUG_PRINT_STRING(" WAS SET SUCCESSFULLY\r");
 						DDS2_Amplitude_Value = Swing_Compensation_Table(DDS2_Frequency_Value, System_Registers_Array[15]);
 						DDS2_Amplitude_Value = DDS2_Amplitude_Value / 3.0373; // NUMBER TO WORD CONVERTION (CONVERT TO VOLTS AND DIVIDE TO THE STEP) VALUE / 1000 / 0.0209803 = WORD
 				
@@ -1527,26 +1798,64 @@ void main (void)
 				if (Amplifier_CW_Mode_Switches_Set)
 					{
 						Amplifier_CW_Mode_Switches_Set = FALSE;
-					//	Amplifier_CW_Mode_Switches_Value = Clear_Headers_From_The_Word(System_Registers_Array[40]);
+						
 						Amplifier_CW_Mode_Switches_Value = System_Registers_Array[40];
-						Amplifier_CW_Mode_Convertion_Table(Amplifier_CW_Mode_Switches_Value);
+						if (!Amplifier_CW_Mode_Convertion_Table(Amplifier_CW_Mode_Switches_Value)) 
+							{
+								Send_Error_Word(Amplifier_CW_Mode_Word_Error);
+								DEBUG_PRINT_STRING("AMPLIFIER CW MODE SWITCHES WAS SET TO VALUE OF: ");
+								DEBUG_PRINT_VARIABLE(Amplifier_CW_Mode_Switches_Value);
+								DEBUG_PRINT_STRING(" UNSUCCESSFULLY\r");
+							}
+						else 
+							{
+								DEBUG_PRINT_STRING("AMPLIFIER CW MODE SWITCHES WAS SET TO VALUE OF: ");
+								DEBUG_PRINT_VARIABLE(Amplifier_CW_Mode_Switches_Value);
+								DEBUG_PRINT_STRING(" SUCCESSFULLY\r");
+							}
 					}
 					
 				if (Amplifier_Pulse_Mode_Switches_Set)
 					{
 						Amplifier_Pulse_Mode_Switches_Set = FALSE;
-					//	Amplifier_Pulse_Mode_Switches_Value = Clear_Headers_From_The_Word(System_Registers_Array[41]);
+					
 						Amplifier_Pulse_Mode_Switches_Value = System_Registers_Array[41];
-						if (!Amplifier_Pulse_Mode_Convertion_Table(Amplifier_Pulse_Mode_Switches_Value)) Send_Error_Word(Amplifier_Pulse_Mode_Word_Error);
+						if (!Amplifier_Pulse_Mode_Convertion_Table(Amplifier_Pulse_Mode_Switches_Value)) 
+							{
+								Send_Error_Word(Amplifier_Pulse_Mode_Word_Error);
+								DEBUG_PRINT_STRING("AMPLIFIER PULSE MODE SWITCHES WAS SET TO VALUE OF: ");
+								DEBUG_PRINT_VARIABLE(Amplifier_Pulse_Mode_Switches_Value);
+								DEBUG_PRINT_STRING(" UNSUCCESSFULLY\r");
+							}
+						else 
+							{
+								DEBUG_PRINT_STRING("AMPLIFIER PULSE MODE SWITCHES WAS SET TO VALUE OF: ");
+								DEBUG_PRINT_VARIABLE(Amplifier_Pulse_Mode_Switches_Value);
+								DEBUG_PRINT_STRING(" SUCCESSFULLY\r");
+							}
 					}
 					
 				if (FPGA_Control_Register)
 					{
 						FPGA_Control_Register = FALSE;
-						if (!Tissue_Temperature_Measure()) Send_Error_Word(Tissue_temperature_measure_Error); // RUN TISSUE TEMPERATURE MEASUREMENT FUNCTION
-						System_Registers_Array[44] = 0;
-						System_Registers_Array[44] = (System_Registers_Array[44] | Read_From_FPGA(0x7)) << 8; // READ MSB VALUE
-						System_Registers_Array[44] = (System_Registers_Array[44] | Read_From_FPGA(0x5)); // READ LSB VALUE
+						DEBUG_PRINT_STRING("THE TISSUE TEMPERATURE MEASUREMENT PROCCESS ");
+						if (!Tissue_Temperature_Measure()) // RUN TISSUE TEMPERATURE MEASUREMENT FUNCTION
+							{
+							//	Send_Error_Word(Tissue_temperature_measure_Error); 
+								Write_To_FPGA(0x2, 0x1); // RESET FPGA ERRORS, REMOVE WHEN ERRORS REPORT WILL BE REQUIRED
+								DEBUG_PRINT_STRING("NOT SUCCEDDED\r");
+								System_Registers_Array[44] = 0;
+							}
+						else 
+							{
+								DEBUG_PRINT_STRING("SUCCEDDED\r");
+								System_Registers_Array[44] = 0;
+								System_Registers_Array[44] = (System_Registers_Array[44] | Read_From_FPGA(0x7)) << 8; // READ MSB VALUE
+								System_Registers_Array[44] = (System_Registers_Array[44] | (Read_From_FPGA(0x5) & (0x00FF))); // READ LSB VALUE
+								DEBUG_PRINT_STRING("THE TISSUE TEMPERATURE VALUE IS: ");
+								DEBUG_PRINT_VARIABLE(System_Registers_Array[44]);
+								DEBUG_PRINT_STRING("\r");
+							}
 					}
 				
 				if (Reset_All_Errors)
@@ -1554,12 +1863,17 @@ void main (void)
 						Reset_All_Errors = FALSE;
 						Error1_Register = 0; // ZEROIZE ERROR1 REGISTER
 						Error2_Register = 0; // ZEROIZE ERROR2 REGISTER	
+						System_Registers_Array[36] = 0; // ZEROIZE ERROR1 REGISTER
+						System_Registers_Array[39] = 0; // ZEROIZE ERROR2 REGISTER	
 						System_Registers_Array[42] = 0xFFC1; // ZEROIZE RELEVANT BITS AT FPGA CONTROL REGISTER
 						Write_To_FPGA(0x2, 0x1); // RESET FPGA ERRORS
 						System_Registers_Array[43] = 0xFFFE; // CLEAR RESET ALL ERRORS BIT
+						Test_LED_Operation(2, FALSE);
+						DEBUG_PRINT_STRING("ERROR RESET PROCCESS COMPLETED");
 					}
 				
 				Interrupt_Signal_Strobe();
+				if (!ACK_To_PC(0x55)) Send_Error_Word(UART_Receiver_Error);
 				PIC_PC_ACK = 1;
 			}
 			
@@ -1568,36 +1882,57 @@ void main (void)
 				Power_Control_Register_Read = FALSE;
 				
 				if (!Transmitt_To_PC(System_Registers_Array[1])) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("POWER CONTROL REGISTER RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(System_Registers_Array[1]);
+						DEBUG_PRINT_STRING("\r");
+					}
 			}
 			
 		if (P3_3V_Voltage_Read) 
 			{
 				P3_3V_Voltage_Read = FALSE;
 				Voltage_Domain_Read(P3_3V, P3V3_Resistor_Divider);
+				DEBUG_PRINT_STRING("3.3V VOLTAGE DOMAIN RETURN VALUE IS: ");
+				DEBUG_PRINT_VARIABLE(A2D_Calculated_Value * 1000);
+				DEBUG_PRINT_STRING("\r");
 			}
 			
 		if (P5V_Voltage_Read) 
 			{
 				P5V_Voltage_Read = FALSE;
 				Voltage_Domain_Read(P5V, P5V_Resistor_Divider);
+				DEBUG_PRINT_STRING("5V VOLTAGE DOMAIN RETURN VALUE IS: ");
+				DEBUG_PRINT_VARIABLE(A2D_Calculated_Value * 1000);
+				DEBUG_PRINT_STRING("\r");
 			}
 
 		if (P12V_Voltage_Read) 
 			{
 				P12V_Voltage_Read = FALSE;
 				Voltage_Domain_Read(P12V, P12V_Resistor_Divider);
+				DEBUG_PRINT_STRING("12V VOLTAGE DOMAIN RETURN VALUE IS: ");
+				DEBUG_PRINT_VARIABLE(A2D_Calculated_Value * 1000);
+				DEBUG_PRINT_STRING("\r");
 			}
 			
 		if (P24V_Voltage_Read) 
 			{
 				P24V_Voltage_Read = FALSE;
 				Voltage_Domain_Read(P24V, P24V_Resistor_Divider);
+				DEBUG_PRINT_STRING("24V VOLTAGE DOMAIN RETURN VALUE IS: ");
+				DEBUG_PRINT_VARIABLE(A2D_Calculated_Value * 1000);
+				DEBUG_PRINT_STRING("\r");
 			}
 			
 		if (P48V_Voltage_Read) 
 			{
 				P48V_Voltage_Read = FALSE;
 				Voltage_Domain_Read(P48V, P48V_Resistor_Divider);
+				DEBUG_PRINT_STRING("48V VOLTAGE DOMAIN RETURN VALUE IS: ");
+				DEBUG_PRINT_VARIABLE(A2D_Calculated_Value * 1000);
+				DEBUG_PRINT_STRING("\r");
 			}
 			
 		if (DDS1_Control_Register_Read) 
@@ -1613,12 +1948,24 @@ void main (void)
 				if ((Backup1 > N12V_LOW_THRESHOLD) && (Backup1 < N12V_HIGH_THRESHOLD)) Backup = Backup & 0xFFEF; // IF -12V MEASUREMENT CORRECT CLEAR -12 ERROR BIT
 				else Backup = Backup | 0x0010;
 				if (!Transmitt_To_PC(Backup)) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("DDS1 CONTROL REGISTER RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(Backup);
+						DEBUG_PRINT_STRING("\r");
+					}
 			}
 			
 		if (DDS1_Frequency_Read) 
 			{
 				DDS1_Frequency_Read = FALSE;
 				if (!Transmitt_To_PC(DDS1_Frequency_Value)) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("DDS1 FREQUENCY RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(DDS1_Frequency_Value);
+						DEBUG_PRINT_STRING("\r");
+					}
 			}
 			
 		if (DDS1_Frequency_Measure) 
@@ -1629,25 +1976,58 @@ void main (void)
 					{
 						Backup = (int)(Temporary / 1000); // CONVERT TO KILO HERZ
 						if (!Transmitt_To_PC(Backup)) Send_Error_Word(UART_Transmitter_Error);
+						else
+							{
+								DEBUG_PRINT_STRING("DDS1 MEASUREMENT RETURN VALUE IS: ");
+								DEBUG_PRINT_VARIABLE(Backup);
+								DEBUG_PRINT_STRING("\r");
+							}
 					}
-				else Send_Error_Word(DDS1_Frequency_Error);
+				else 
+					{
+						Send_Error_Word(DDS1_Frequency_Error);
+						DEBUG_PRINT_STRING("DDS1 FREQUENCY ERROR DETECTED");
+					}
 			}
 			
 		if (DDS1_Amplitude_Read) 
 			{
 				DDS1_Amplitude_Read = FALSE;
 				if (!Transmitt_To_PC(System_Registers_Array[10])) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("DDS1 AMPLITUDE RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(System_Registers_Array[10]);
+						DEBUG_PRINT_STRING("\r");
+					}
 			}
 			
 		if (DDS1_Amplitude_Measure) 
 			{
-				Backup = Output_Amplitude_Measure(FALSE, FALSE);
 				DDS1_Amplitude_Measure = FALSE;
-				if (Validate_Amplitude_Setting(Backup, FALSE))
+				if ((System_Registers_Array[10] != 0) && (DDS1_OUTPUT_ENABLE_DISABLE)) // IF AMPLITUDE VALUE IS 0, DON'T VALIDATE, DUE TO DIVIDING BY ZERO
 					{
+						Backup = Output_Amplitude_Measure(FALSE, FALSE);
+							
 						if (!Transmitt_To_PC(Backup)) Send_Error_Word(UART_Transmitter_Error);
+						else
+							{
+								DEBUG_PRINT_STRING("DDS1 AMPLITUDE MEASUREMENT RETURN VALUE IS: ");
+								DEBUG_PRINT_VARIABLE(Backup);
+								DEBUG_PRINT_STRING("\r");
+							}
+					/*	if (Validate_Amplitude_Setting(Backup, FALSE))
+							{
+								if (!Transmitt_To_PC(Backup)) Send_Error_Word(UART_Transmitter_Error);
+								DEBUG_PRINT_STRING("DDS1 AMPLITUDE MEASUREMENT VALIDATION SUCCEDDED");
+							}
+						else 
+							{
+								Send_Error_Word(DDS1_Amplitude_Error);
+								DEBUG_PRINT_STRING("DDS1 AMPLITUDE MEASUREMENT VALIDATION FAILED");
+							}*/
 					}
-				else Send_Error_Word(DDS1_Amplitude_Error);
+				else if (!Transmitt_To_PC(0x0)) Send_Error_Word(UART_Transmitter_Error);
 			}
 			
 		if (DDS2_Control_Register_Read) 
@@ -1663,12 +2043,24 @@ void main (void)
 				if ((Backup1 > N12V_LOW_THRESHOLD) && (Backup1 < N12V_HIGH_THRESHOLD)) Backup = Backup & 0xFFEF; // IF -12V MEASUREMENT CORRECT CLEAR -12 ERROR BIT
 				else Backup = Backup | 0x0010;
 				if (!Transmitt_To_PC(Backup)) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("DDS2 CONTROL REGISTER RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(Backup);
+						DEBUG_PRINT_STRING("\r");
+					}
 			}
 		
 		if (DDS2_Frequency_Read) 
 			{
 				DDS2_Frequency_Read = FALSE;
 				if (!Transmitt_To_PC(DDS2_Frequency_Value)) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("DDS2 FREQUENCY RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(DDS2_Frequency_Value);
+						DEBUG_PRINT_STRING("\r");
+					}
 			}
 			
 		if (DDS2_Frequency_Measure) 
@@ -1679,57 +2071,118 @@ void main (void)
 					{
 						Backup = (int)(Temporary / 1000); // CONVERT TO KILO HERZ
 						if (!Transmitt_To_PC(Backup)) Send_Error_Word(UART_Transmitter_Error);
+						else
+							{
+								DEBUG_PRINT_STRING("DDS2 MEASUREMENT RETURN VALUE IS: ");
+								DEBUG_PRINT_VARIABLE(Backup);
+								DEBUG_PRINT_STRING("\r");
+							}
 					}
-				else Send_Error_Word(DDS2_Frequency_Error);
+				else 
+					{
+						Send_Error_Word(DDS2_Frequency_Error);
+						DEBUG_PRINT_STRING("DDS2 FREQUENCY ERROR DETECTED");
+					}
 			}
 			
 		if (DDS2_Amplitude_Read) 
 			{
 				DDS2_Amplitude_Read = FALSE;
 				if (!Transmitt_To_PC(System_Registers_Array[15])) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("DDS2 AMPLITUDE RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(System_Registers_Array[15]);
+						DEBUG_PRINT_STRING("\r");
+					}
 			}
 			
 		if (DDS2_Amplitude_Measure) 
 			{
-				Backup = Output_Amplitude_Measure(TRUE, FALSE);
 				DDS2_Amplitude_Measure = FALSE;
-				if (Validate_Amplitude_Setting(Backup, TRUE))
+				if ((System_Registers_Array[15] != 0) && (DDS2_OUTPUT_ENABLE_DISABLE)) // IF AMPLITUDE VALUE IS 0, DON'T VALIDATE, DUE TO DIVIDING BY ZERO
 					{
+						Backup = Output_Amplitude_Measure(TRUE, FALSE);
+	
 						if (!Transmitt_To_PC(Backup)) Send_Error_Word(UART_Transmitter_Error);
+						else
+							{
+								DEBUG_PRINT_STRING("DDS2 AMPLITUDE MEASUREMENT RETURN VALUE IS: ");
+								DEBUG_PRINT_VARIABLE(Backup);
+								DEBUG_PRINT_STRING("\r");
+							}
+					/*	if (Validate_Amplitude_Setting(Backup, TRUE))
+							{
+								if (!Transmitt_To_PC(Backup)) Send_Error_Word(UART_Transmitter_Error);
+								DEBUG_PRINT_STRING("DDS2 AMPLITUDE MEASUREMENT VALIDATION SUCCEDDED");
+							}
+						else 
+							{
+								Send_Error_Word(DDS2_Amplitude_Error);
+								DEBUG_PRINT_STRING("DDS2 AMPLITUDE MEASUREMENT VALIDATION FAILED");
+							}*/
 					}
-				else Send_Error_Word(DDS2_Amplitude_Error);
+				else if (!Transmitt_To_PC(0x0)) Send_Error_Word(UART_Transmitter_Error);
 			}
 			
 		if (Amplifier1_Control_Register_Read) 
 			{
 				Amplifier1_Control_Register_Read = FALSE;
 				if (!Transmitt_To_PC(System_Registers_Array[17])) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("AMPLIFIER1 CONTROL REGISTER RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(System_Registers_Array[17]);
+						DEBUG_PRINT_STRING("\r");
+					}
 			}
 			
 		if (Amplifier1_Temperature_Read) 
 			{
 				Amplifier1_Temperature_Read = FALSE;
+				Voltage_Domain_Read(AMP_TEMP_SNS, Amplifier1_Temperature_Attenuator);
+				DEBUG_PRINT_STRING("AMPLIFIER1 TEMPERATURE RETURN VALUE IS: ");
+				DEBUG_PRINT_VARIABLE(A2D_Calculated_Value * 1000);
+				DEBUG_PRINT_STRING("\r");
 			}
 			
 		if (Amplifier1_Current_Read) 
 			{
 				Amplifier1_Current_Read = FALSE;
+				Voltage_Domain_Read(AMP_CUR_SNS1, Amplifier1_Current_Attenuator);
+				DEBUG_PRINT_STRING("AMPLIFIER1 CURRENT RETURN VALUE IS: ");
+				DEBUG_PRINT_VARIABLE(A2D_Calculated_Value * 1000);
+				DEBUG_PRINT_STRING("\r");
 			}
 		
 		if (Amplifier1_Reverse_Power_Read) 
 			{
 				Amplifier1_Reverse_Power_Read = FALSE;
+				Voltage_Domain_Read(AMP_RVRS_PWR_SNS1, Amplifier1_Reverse_Power_Attenuator);
+				DEBUG_PRINT_STRING("AMPLIFIER1 REVERSE POWER RETURN VALUE IS: ");
+				DEBUG_PRINT_VARIABLE(A2D_Calculated_Value * 1000);
+				DEBUG_PRINT_STRING("\r");
 			}
 			
 		if (Amplifier1_Forward_Power_Read) 
 			{
 				Amplifier1_Forward_Power_Read = FALSE;
+				Voltage_Domain_Read(AMP_FRWD_PWR_SNS1, Amplifier1_Forward_Power_Attenuator);
+				DEBUG_PRINT_STRING("AMPLIFIER1 FORWARD POWER RETURN VALUE IS: ");
+				DEBUG_PRINT_VARIABLE(A2D_Calculated_Value * 1000);
+				DEBUG_PRINT_STRING("\r");
 			}
 			
 		if (Amplifier2_Control_Register_Read) 
 			{
 				Amplifier2_Control_Register_Read = FALSE;
 				if (!Transmitt_To_PC(System_Registers_Array[22])) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("AMPLIFIER2 CONTROL REGISTER RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(System_Registers_Array[22]);
+						DEBUG_PRINT_STRING("\r");
+					}
 			}
 			
 		if (Amplifier2_Temperature_Read) 
@@ -1740,22 +2193,40 @@ void main (void)
 		if (Amplifier2_Current_Read) 
 			{
 				Amplifier2_Current_Read = FALSE;
+				Voltage_Domain_Read(AMP_CUR_SNS2, Amplifier2_Current_Attenuator);
+				DEBUG_PRINT_STRING("AMPLIFIER2 CURRENT RETURN VALUE IS: ");
+				DEBUG_PRINT_VARIABLE(A2D_Calculated_Value * 1000);
+				DEBUG_PRINT_STRING("\r");
 			}
 			
 		if (Amplifier2_Reverse_Power_Read) 
 			{
 				Amplifier2_Reverse_Power_Read = FALSE;
+				Voltage_Domain_Read(AMP_RVRS_PWR_SNS2, Amplifier2_Reverse_Power_Attenuator);
+				DEBUG_PRINT_STRING("AMPLIFIER2 REVERSE POWER RETURN VALUE IS: ");
+				DEBUG_PRINT_VARIABLE(A2D_Calculated_Value * 1000);
+				DEBUG_PRINT_STRING("\r");
 			}
 			
 		if (Amplifier2_Forward_Power_Read) 
 			{
 				Amplifier2_Forward_Power_Read = FALSE;
+				Voltage_Domain_Read(AMP_FRWD_PWR_SNS2, Amplifier2_Forward_Power_Attenuator);
+				DEBUG_PRINT_STRING("AMPLIFIER2 FORWARD POWER RETURN VALUE IS: ");
+				DEBUG_PRINT_VARIABLE(A2D_Calculated_Value * 1000);
+				DEBUG_PRINT_STRING("\r");
 			}
 			
 		if (Handpiece_Control_Register_Read) 
 			{
 				Handpiece_Control_Register_Read = FALSE;
 				if (!Transmitt_To_PC(System_Registers_Array[27])) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("HANDPIECE CONTROL REGISTER RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(System_Registers_Array[27]);
+						DEBUG_PRINT_STRING("\r");
+					}
 			}
 			
 		if (Handpiece_Temperature1_Read) 
@@ -1786,30 +2257,55 @@ void main (void)
 		if (Vacuum_Pressure_Read) 
 			{
 				Vacuum_Pressure_Read = FALSE;
+				Voltage_Domain_Read(VAC_PRESR_SENS, Vacuum_Pressure_Attenuator);
+				DEBUG_PRINT_STRING("VACCUM PRESSURE RETURN VALUE IS: ");
+				DEBUG_PRINT_VARIABLE(A2D_Calculated_Value * 1000);
+				DEBUG_PRINT_STRING("\r");
 			}
 
 		if (TEC_Voltage_Read) 
 			{
 				TEC_Voltage_Read = FALSE;
 				if (!Transmitt_To_PC(System_Registers_Array[35])) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("TEC VOLTAGE REGISTER RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(System_Registers_Array[35]);
+						DEBUG_PRINT_STRING("\r");
+					}
 			}
 			
 		if (TEC_Voltage_Measure) 
 			{
 				TEC_Voltage_Measure = FALSE;
 				Voltage_Domain_Read(HP_TEC_Power_SNS, HPTEC_Att_Coefficient);
+				DEBUG_PRINT_STRING("TEC VOLTAGE MEASUREMENT RETURN VALUE IS: ");
+				DEBUG_PRINT_VARIABLE(A2D_Calculated_Value * 1000);
+				DEBUG_PRINT_STRING("\r");
 			}	
 		
 		if (Errors1_Register_Read) 
 			{
 				Errors1_Register_Read = FALSE;
 				if (!Transmitt_To_PC(Error1_Register)) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("ERROR1 REGISTER RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(Error1_Register);
+						DEBUG_PRINT_STRING("\r");
+					}
 			}
 		
 		if (Errors2_Register_Read) 
 			{
 				Errors2_Register_Read = FALSE;
 				if (!Transmitt_To_PC(Error2_Register)) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("ERROR2 REGISTER RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(Error2_Register);
+						DEBUG_PRINT_STRING("\r");
+					}
 			}
 			
 		if (MCU_FPGA_Version_Read) 
@@ -1818,6 +2314,12 @@ void main (void)
 				Backup = FPGA_Version_Number;
 				Backup = (Backup << 8) | MCU_Version_Number;
 				if (!Transmitt_To_PC(Backup)) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("MCU FPGA VERSION REGISTER RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(Backup);
+						DEBUG_PRINT_STRING("\r");
+					}
 			}
 			
 		if (Controller_Handpiece_Serial_Read) 
@@ -1828,37 +2330,70 @@ void main (void)
 		if (CW_Mode_Switches_Register_Read)
 			{
 				CW_Mode_Switches_Register_Read = FALSE;
-				if (!Transmitt_To_PC(System_Registers_Array[40])) Send_Error_Word(UART_Transmitter_Error);	
+				if (!Transmitt_To_PC(System_Registers_Array[40])) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("CW MODE SWITCHES REGISTER RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(System_Registers_Array[40]);
+						DEBUG_PRINT_STRING("\r");
+					}
 			}
 			
 		if (Pulse_Mode_Switches_Register_Read)
 			{
 				Pulse_Mode_Switches_Register_Read = FALSE;
-				if (!Transmitt_To_PC(System_Registers_Array[41])) Send_Error_Word(UART_Transmitter_Error);	
+				if (!Transmitt_To_PC(System_Registers_Array[41])) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("PULSE MODE SWITCHES REGISTER RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(System_Registers_Array[41]);
+						DEBUG_PRINT_STRING("\r");
+					}				
 			}
 			
 		if (Main_Control_Register_Read) 
 			{
 				Main_Control_Register_Read = FALSE;
 				if (!Transmitt_To_PC(System_Registers_Array[43])) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("MAIN CONTROL REGISTER RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(System_Registers_Array[43]);
+						DEBUG_PRINT_STRING("\r");
+					}
 			}		
 		
 		if (FPGA_Control_Register_Read)
 			{
 				FPGA_Control_Register_Read = FALSE;
-				if (!Transmitt_To_PC(System_Registers_Array[42])) Send_Error_Word(UART_Transmitter_Error);	
+				if (!Transmitt_To_PC(System_Registers_Array[42])) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("FPGA CONTROL REGISTER RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(System_Registers_Array[42]);
+						DEBUG_PRINT_STRING("\r");
+					}				
 			}
+			
 		if (FPGA_Interrupt_Flag)
 			{
 				FPGA_Interrupt_Flag = FALSE;
 				FPGA_Interrupt_Parsing();
+				Interrupt_Signal_Strobe();
+				DEBUG_PRINT_STRING("FPGA INTERRUPTS PARSED SUCCESSFULLY\r");
 				Main_Interrupt_Detection_Enable;	
 			}
 			
 		if (Tissue_Temperature_Measurement_Value_Read)
 			{
 				Tissue_Temperature_Measurement_Value_Read = FALSE;
-				if (!Transmitt_To_PC(System_Registers_Array[44])) Send_Error_Word(UART_Transmitter_Error);	
+				if (!Transmitt_To_PC(System_Registers_Array[44])) Send_Error_Word(UART_Transmitter_Error);
+				else
+					{
+						DEBUG_PRINT_STRING("TISSUE TEMPERATURE MEASUREMENT RETURN VALUE IS: ");
+						DEBUG_PRINT_VARIABLE(System_Registers_Array[44]);
+						DEBUG_PRINT_STRING("\r");
+					}					
 			}
 	}
 	

@@ -19,6 +19,7 @@ void Frequency_Value_Set(long Value, BOOL DDS_Number) // SET DDS GENERATOR
 {
 	Value = Value / 0.02328; // NUMBER TO WORD CONVERTION
 	Synthesizer_Control_Write(Value, 0x0, 0x0, DDS_Number); // CONFIGURE SYNTHESIZER WITH NEW VALUES
+	
 }
 
 int Swing_Compensation_Table(int DDS_Frequency_Value, int DDS_Amplitude_Value)
@@ -121,7 +122,7 @@ int Get_Amplitude_Value(BOOL DDS_Number, BOOL Before_After_Switch) // SAMPLE AMP
 	if (!Before_After_Switch)
 		{
 			if (!DDS_Number) Value = A2D_Value_Read(DDS1_BEFORE_SW_SNS);
-			else Value = A2D_Value_Read(DDS1_BEFORE_SW_SNS);
+			else Value = A2D_Value_Read(DDS2_BEFORE_SW_SNS);
 		}
 	else 
 		{
@@ -136,14 +137,48 @@ int Output_Amplitude_Measure(BOOL DDS_Number, BOOL Before_After_Switch) // MEASU
 {
 	int Amplitude_Tmp_Value = 0, Amplitude_Value = 0, counter = 0;
 	float Amplitude_Real_Value = 0;
+	BOOL DDS1_Out_Flag = FALSE, DDS2_Out_Flag = FALSE;
 	
+	#ifdef Voltage_Domain_Validation_Enable_Flag 
+		Timer5Disable;
+	#endif
 	Timer3Disable;
 	TMR3_INTFLAG = 0; // DISABLE TIMEOUT TIMER
 	RESET_TIMER3;
 	System_Work_Mode = System_Configuration_Mode;
 	A2D_Sine_Amplitude_Timeout_Counter = 0;
 	
-	Frequency_Value_Set(100, DDS_Number); // SET FREQUENCY TO 100HZ
+	if (!DDS_Number) // SOURCE THAT NOT MEASURED SHOULD BE DC
+		{
+			Frequency_Value_Set(100, FALSE); // SET FREQUENCY TO 100HZ
+			Frequency_Value_Set(0, TRUE); // SET FREQUENCY TO DC
+			if (DDS1_OUT_ENABLE) // IF DDS1 DISABLED 
+				{
+					DDS1_OUT_ON;
+					DDS1_Out_Flag = TRUE;
+				}
+			if (!DDS2_OUT_ENABLE) // IF DDS2 ENABLED
+				{
+					DDS2_OUT_OFF;
+					DDS2_Out_Flag = TRUE;
+				}
+		}
+	else
+		{
+			Frequency_Value_Set(0, FALSE); // SET FREQUENCY TO DC
+			Frequency_Value_Set(100, TRUE); // SET FREQUENCY TO 100HZ
+			if (!DDS1_OUT_ENABLE) // IF DDS1 ENABLED 
+				{
+					DDS1_OUT_OFF;
+					DDS1_Out_Flag = TRUE;
+				}
+			if (DDS2_OUT_ENABLE) // IF DDS2 DISABLED
+				{
+					DDS2_OUT_ON;
+					DDS2_Out_Flag = TRUE;
+				}
+		}
+	
 
 	Amplitude_Tmp_Value = Get_Amplitude_Value(DDS_Number, Before_After_Switch); // TAKE FIRST SAMPLE
 
@@ -187,9 +222,20 @@ int Output_Amplitude_Measure(BOOL DDS_Number, BOOL Before_After_Switch) // MEASU
 	RESET_TIMER3;
 	A2D_Sine_Amplitude_Timeout_Counter = 0;
 	
-	if (!DDS_Number) Frequency_Value_Set((long)((long)DDS1_Frequency_Value * (long)1000), DDS_Number); // SET ORIGINAL FREQUENCY
-	else Frequency_Value_Set((long)((long)DDS2_Frequency_Value * (long)1000), DDS_Number);
-
+	Frequency_Value_Set((long)((long)DDS1_Frequency_Value * (long)1000), FALSE); // SET ORIGINAL FREQUENCY
+	Frequency_Value_Set((long)((long)DDS2_Frequency_Value * (long)1000), TRUE);
+	
+	if (!DDS_Number)
+		{
+			if (DDS1_Out_Flag) DDS1_OUT_OFF;
+			if (DDS2_Out_Flag) DDS2_OUT_ON;
+		}
+	else
+		{
+			if (DDS1_Out_Flag) DDS1_OUT_ON;
+			if (DDS2_Out_Flag) DDS2_OUT_OFF;
+		}
+	
 	Amplitude_Real_Value = Amplitude_Value; // CONVERT TO FLOAT 
 	Amplitude_Real_Value  = (Amplitude_Real_Value * Vref) / 4096; // CALCULATE REAL SINE (STEP * DIGITAL NUMBER)
 	Amplitude_Real_Value = (Amplitude_Real_Value * Divider) / 1.41421; //	CALCULATE RMS SINE
@@ -208,45 +254,58 @@ int Output_Amplitude_Measure(BOOL DDS_Number, BOOL Before_After_Switch) // MEASU
 	Amplitude_Value = Amplitude_Real_Value * 1000;
 	
 	System_Work_Mode = System_Idle_Mode;
-	TMR5_INTFLAG = 0; // DISABLE TIMEOUT TIMER
-	RESET_TIMER5;
-	Timeout_Counter = 0;
-	Timer5Enable;
+	
+	#ifdef Voltage_Domain_Validation_Enable_Flag 
+		TMR5_INTFLAG = 0; // DISABLE TIMEOUT TIMER
+		RESET_TIMER5;
+		Timeout_Counter = 0;
+		Timer5Enable;
+	#endif
 	
 	return(Amplitude_Value);
 }
 
-BOOL Validate_Amplitude_Setting(int Value, BOOL DDS_Number) // AMPLITUDE VALIDATION TABLE
+BOOL Validate_Amplitude_Setting(float Value, BOOL DDS_Number) // AMPLITUDE VALIDATION TABLE
 {
 	float Backup = 0, Backup1 = 0;
+
+	Value = Value / 10;
 	
 	if (!DDS_Number)
 		{
-			Backup = (float)((float)Value / (float)System_Registers_Array[10]);
-			Backup1 = (float)((float)System_Registers_Array[10] / (float)Value);
+			Backup = (float)(Value / (float)System_Registers_Array[10]);
+			Backup1 = (float)((float)System_Registers_Array[10] / Value);
 		}
 	else 
 		{
-			Backup = (float)((float)Value / (float)System_Registers_Array[15]);
-			Backup1 = (float)((float)System_Registers_Array[15] / (float)Value);
+			Backup = (float)(Value / (float)System_Registers_Array[15]);
+			Backup1 = (float)((float)System_Registers_Array[15] / Value);
 		}
 
 	if (!DDS_Number)
 		{
-			if (System_Registers_Array[10] > 200) 
-				if ((Backup < 0.75) || (Backup1 < 0.75)) return (FALSE);
-				else return (TRUE);
+			if (System_Registers_Array[10] > 20) 
+				if ((Backup < 0.75) || (Backup1 < 0.75)) 
+					return (FALSE);
+				else 
+					return (TRUE);
 			else
-				if ((Backup < 0.5) || (Backup1 < 0.5)) return (FALSE);
-				else return (TRUE);
+				if ((Backup < 0.5) || (Backup1 < 0.5)) 
+					return (FALSE);
+				else 
+					return (TRUE);
 		}
 	else
 		{
-			if (System_Registers_Array[15] > 200) 
-				if ((Backup < 0.75) || (Backup1 < 0.75)) return (FALSE);
-				else return (TRUE);
+			if (System_Registers_Array[15] > 20) 
+				if ((Backup < 0.75) || (Backup1 < 0.75)) 
+					return (FALSE);
+				else 
+					return (TRUE);
 			else
-				if ((Backup < 0.5) || (Backup1 < 0.5)) return (FALSE);
-				else return (TRUE);
+				if ((Backup < 0.5) || (Backup1 < 0.5)) 
+					return (FALSE);
+				else 
+					return (TRUE);
 		}
 } 

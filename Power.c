@@ -135,8 +135,20 @@ BOOL Domains_Power_Control(char Domain, BOOL Off_On) // POWER ON AND OFF MAIN DO
 			case FPGA2V5:
 				Write_To_Extender(Expander_B_SPI, 0x04, 0x00); // DISABLE ALL INTERRUPTS
 				Tmp = Read_From_Extender(Expander_D_SPI, 0x13); // READ PORT STATUS FROM EXPANDER D
-				if (!Off_On) Write_To_Extender(Expander_D_SPI, 0x13, Tmp | 0x08); // SET RELEVANT BIT
-				else Write_To_Extender(Expander_D_SPI, 0x13, Tmp & 0xF7); // CLEAR RELEVANT BIT
+				if (!Off_On) 
+					{
+						Write_To_Extender(Expander_D_SPI, 0x13, Tmp | 0x08); // SET RELEVANT BIT
+						Tmp = Read_From_Extender(Expander_A_SPI, 0x12); // READ PORT STATUS FROM EXPANDER A
+						Write_To_Extender(Expander_A_SPI, 0x12, Tmp & 0xEF); // CLEAR CONTROLLER FPGA RESET BIT
+						Delay_625US(500); // delay 300 msec
+					}
+				else 
+					{
+						Write_To_Extender(Expander_D_SPI, 0x13, Tmp & 0xF7); // CLEAR RELEVANT BIT
+						Delay_625US(500); // delay 300 msec
+						Tmp = Read_From_Extender(Expander_A_SPI, 0x12); // READ PORT STATUS FROM EXPANDER A
+						Write_To_Extender(Expander_A_SPI, 0x12, Tmp | 0x10); // SET CONTROLLER FPGA RESET BIT
+					}
 				
 				Extender_Interrupt_Clear(Expander_B_SPI);
 				Write_To_Extender(Expander_B_SPI, 0x04, 0xFF); // ENABLE ALL INTERRUPTS
