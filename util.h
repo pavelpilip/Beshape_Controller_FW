@@ -22,7 +22,8 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 	#define Vol_Mon_Max_Samples_Number 10
 	#define Maximum_Allowable_Transactions 3
 	#define Vref 3
-	#define System_Registers_Number 45
+	#define System_Registers_Number 47
+	#define Interrupt_Pulse_Width 64 // 30msec
 
 /*************************************AMPLITUDE MEASUREMENT PARAMETERS********************/
 	#define Divider 3.1276595
@@ -39,9 +40,9 @@ typedef enum _BOOL { FALSE = 0, TRUE } BOOL;
 	#define N5V_Resistor_Divider 0.5
 	#define P12V_Resistor_Divider 0.204
 	#define N12V_Resistor_Divider 0.21
-	#define P24V_Resistor_Divider 0.11
-	#define P150V_Resistor_Divider 0.01666
-	#define P48V_Resistor_Divider 0.05
+	#define P24V_Resistor_Divider 0.10351967
+	#define P150V_Resistor_Divider 0.016666667
+	#define P48V_Resistor_Divider 0.05208333
 	#define HPTEC_Att_Coefficient 0.35
 	#define Amplifier1_Temperature_Attenuator 0.843
 	#define Amplifier1_Current_Attenuator 1.5

@@ -47,14 +47,15 @@ BOOL Vacuum_Pressure_Read = FALSE, TEC_Voltage_Read = FALSE, TEC_Voltage_Measure
 BOOL Controller_Handpiece_Serial_Read = FALSE, Errors2_Register_Read = FALSE, Amplifier_CW_Mode_Switches_Set = FALSE, Amplifier_Pulse_Mode_Switches_Set = FALSE;
 BOOL CW_Mode_Switches_Register_Read = FALSE, Pulse_Mode_Switches_Register_Read = FALSE, FPGA_Interrupt_Flag = FALSE, Reset_All_Errors = FALSE;
 BOOL Main_Control_Register_Read = FALSE, Tissue_Temperature_Measurement_Value_Read = FALSE, FPGA_Control_Register = FALSE, FPGA_Control_Register_Read = FALSE;
+BOOL Pulser_Voltage_Read = FALSE;
 
-BOOL UART_Communication_Flag = FALSE, UART_Timeout = FALSE;
+BOOL PC_Busy_Timeout_Flag = FALSE, PC_Busy_Timeout = FALSE;
 
 char MSB_Byte = 0, LSB_Byte = 0, FPGA_Version_Number = 0;
 
 /////////////////////REGISTERS BITS FLAGS MODULE END///////////////////////////////
 
-extern Data_Receive_Error;//, UART_Communication_Flag, UART_Timeout;
+extern Data_Receive_Error;//, PC_Busy_Timeout_Flag, UART_Timeout;
 extern Frequency_Measurement_Completed;
 
 BOOL PC_Word_Detected = FALSE, Read_Write_Transaction = FALSE;
@@ -122,11 +123,11 @@ void high_priority_interrupt (void)
 						Timeout_Counter = 0;
 						System_Domains_Measure_Enable_Flag = TRUE;
 					}
-				/*else if ((Timeout_Counter > 77) && (UART_Communication_Flag)) // 500 MILI SECONDS PASSED AND UART COMMUNICATION ENABLED
+				else if ((Timeout_Counter > 77) && (PC_Busy_Timeout_Flag)) // 500 MILI SECONDS PASSED AND BUSY TIMEOUT ENABLED
 					{
 						Timeout_Counter = 0;	
-						UART_Timeout = TRUE; 
-					}*/
+						PC_Busy_Timeout = TRUE; 
+					}
 				else Timer5Enable;
 			}
 		return;
@@ -136,7 +137,7 @@ void high_priority_interrupt (void)
 	{
 		Main_Interrupt_Detection_Disable;
 		Main_Interrupt_Detected = 0;
-		PIC_PC_ACK = 0; // CONTROLLER IS BUSY
+	//	PIC_PC_ACK = 0; // CONTROLLER IS BUSY
 		FPGA_Interrupt_Flag = TRUE;
 		return;	
 	}
@@ -227,17 +228,36 @@ void Init(void) // INITIALIZATION OF SYSTEM
 	System_Power_Init();
 	TEC_Power_Init();
 	
-	Delay_6_25US(9); // delay 55 usec
+	Delay_625US(Interrupt_Pulse_Width); // CONTROLLER TO PC PULSE HIGH WIDTH
 	
 	DEBUG_PRINT_STRING("INITIALIZATION COMPLETED\r");
 }
 
-void Interrupt_Signal_Strobe() // STROBE INTERRUPT SIGNAL
+BOOL PC_Is_Available() // CHECK IF PC IS AVAILABLE "0" - BUSY, "1" - AVAILABLE
+{
+	char Tmp = 0;
+	Tmp = Read_From_Extender(Expander_B_SPI, 0x13); // READ PORT STATUS FROM EXPANDER B
+	Tmp = (Tmp >> 5) & 0x01;
+	if (Tmp == 1) return (TRUE);
+	else return (FALSE);
+}
+
+void Command_Completion_Interrupt_Strobe() // STROBE COMMAND COMPLETED INTERRUPT SIGNAL
 {
 	char Tmp = 0;
 	Tmp = Read_From_Extender(Expander_C_SPI, 0x13); // READ PORT STATUS FROM EXPANDER C
-	Write_To_Extender(Expander_C_SPI, 0x13, Tmp | 0x08); // SET INTERRUPT TRIGGER
-	Write_To_Extender(Expander_C_SPI, 0x13, Tmp & 0xF7); // CLEAR INTERRUPT TRIGGER
+	Write_To_Extender(Expander_C_SPI, 0x13, Tmp | 0x10); // SET OPERATION COMPLETE INTERRUPT TRIGGER
+	Delay_625US(Interrupt_Pulse_Width); // CONTROLLER TO PC PULSE HIGH WIDTH
+	Write_To_Extender(Expander_C_SPI, 0x13, Tmp & 0xEF); // CLEAR OPERATION COMPLETE INTERRUPT TRIGGER
+}
+
+void Error_Interrupt_Signal_Strobe() // STROBE ERROR INTERRUPT SIGNAL
+{
+	char Tmp = 0;
+	Tmp = Read_From_Extender(Expander_C_SPI, 0x13); // READ PORT STATUS FROM EXPANDER C
+	Write_To_Extender(Expander_C_SPI, 0x13, Tmp | 0x08); // SET ERROR INTERRUPT TRIGGER
+	Delay_625US(Interrupt_Pulse_Width); // CONTROLLER TO PC PULSE HIGH WIDTH
+	Write_To_Extender(Expander_C_SPI, 0x13, Tmp & 0xF7); // CLEAR ERROR INTERRUPT TRIGGER
 }
 
 void Test_LED_Operation(char LED_Number, BOOL On_Off)
@@ -401,13 +421,8 @@ void Send_Error_Word(int Error)
 		}
 	System_Registers_Array[36] = Error1_Register;
 	System_Registers_Array[39] = Error2_Register;
-	Interrupt_Signal_Strobe();
-}
- 
-BOOL ACK_To_PC(char Value) // 0x55 - TRANSACTION OK, 0xAA - TRANSACTION ERROR
-{
-	if (!Write_To_PC(Value)) return (FALSE);
-	else return (TRUE);
+	Error_Interrupt_Signal_Strobe();
+	PIC_PC_ACK = 1;
 }
  
 BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
@@ -442,12 +457,6 @@ BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 							DEBUG_PRINT_STRING("\r");
 							
 							PIC_PC_ACK = 1;
-							if (!ACK_To_PC(0x55)) 
-								{
-									Send_Error_Word(UART_Receiver_Error);
-									DEBUG_PRINT_STRING("DATA1 ACK WAS SENT UNSUCCESSFULLY\r");
-								}
-							else DEBUG_PRINT_STRING("DATA1 ACK WAS SENT SUCCESSFULLY\r");
 							return (TRUE);
 						}
 					if (PC_Transaction_Counter == 3) 
@@ -467,7 +476,6 @@ BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 				}
 			else 
 				{
-					Send_Error_Word(Word_Format_Error);
 					DEBUG_PRINT_STRING("WORD FORMAT ERROR DETECTED DURING DATA PARSING\r");
 					
 					DEBUG_PRINT_STRING("ERROR DATA VALUE BEFORE HEADERS CUT: ");
@@ -477,10 +485,9 @@ BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 					DEBUG_PRINT_STRING("ERROR DATA VALUE AFTER HEADERS CUT: ");
 					DEBUG_PRINT_VARIABLE(Word);
 					DEBUG_PRINT_STRING("\r");
-					PIC_PC_ACK = 1;
-					if (!ACK_To_PC(0xAA)) Send_Error_Word(UART_Receiver_Error);
 					Test_LED_Operation(1, FALSE); // POWER OFF COMMUNICATION OPERATION LED
 					PC_Transaction_Counter = 1;
+					Send_Error_Word(Word_Format_Error);
 					return (FALSE);
 				}
 		}
@@ -499,22 +506,12 @@ BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 					DEBUG_PRINT_STRING("WRITE TO ADDRESS AFTER HEADERS CUT: ");
 					DEBUG_PRINT_VARIABLE(Received_Transaction_Address);
 					DEBUG_PRINT_STRING("\r");
-					
-				/*	if (PC_Transaction_Counter == 1)
-						while(1);*/
-					
+				
 					PIC_PC_ACK = 1;
-					if (!ACK_To_PC(0x55)) 
-						{
-							Send_Error_Word(UART_Receiver_Error);
-							DEBUG_PRINT_STRING("ADDRESS WRITE ACK WAS SENT UNSUCCESSFULLY\r");
-						}
-					else DEBUG_PRINT_STRING("ADDRESS WRITE ACK WAS SENT SUCCESSFULLY\r");
 					return (TRUE);
 				}
 			else 
 				{
-					Send_Error_Word(Word_Format_Error);
 					DEBUG_PRINT_STRING("WORD FORMAT ERROR DETECTED DURING ADDRESS WRITE PARSING\r");
 					
 					DEBUG_PRINT_STRING("ERROR DATA VALUE BEFORE HEADERS CUT: ");
@@ -524,10 +521,9 @@ BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 					DEBUG_PRINT_STRING("ERROR DATA VALUE AFTER HEADERS CUT: ");
 					DEBUG_PRINT_VARIABLE(Word);
 					DEBUG_PRINT_STRING("\r");
-					PIC_PC_ACK = 1;
-					if (!ACK_To_PC(0xAA)) Send_Error_Word(UART_Receiver_Error);
 					Test_LED_Operation(1, FALSE); // POWER OFF COMMUNICATION OPERATION LED
 					PC_Transaction_Counter = 1;
+					Send_Error_Word(Word_Format_Error);
 					return (FALSE);
 				}
 		}
@@ -548,7 +544,6 @@ BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 				}
 			else 
 				{
-					Send_Error_Word(Word_Format_Error);
 					DEBUG_PRINT_STRING("WORD FORMAT ERROR DETECTED DURING ADDRESS READ PARSING\r");
 					
 					DEBUG_PRINT_STRING("ERROR DATA VALUE BEFORE HEADERS CUT: ");
@@ -558,16 +553,14 @@ BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 					DEBUG_PRINT_STRING("ERROR DATA VALUE AFTER HEADERS CUT: ");
 					DEBUG_PRINT_VARIABLE(Word);
 					DEBUG_PRINT_STRING("\r");
-					PIC_PC_ACK = 1;
-					if (!ACK_To_PC(0xAA)) Send_Error_Word(UART_Receiver_Error);
 					Test_LED_Operation(1, FALSE); // POWER OFF COMMUNICATION OPERATION LED
 					PC_Transaction_Counter = 1;
+					Send_Error_Word(Word_Format_Error);
 					return (FALSE);
 				}
 		}
 	else 
 		{
-			Send_Error_Word(Word_Format_Error);
 			DEBUG_PRINT_STRING("WORD FORMAT ERROR DETECTED BEFORE ADDRESS PARSED \r");
 			
 			DEBUG_PRINT_STRING("ERROR DATA VALUE BEFORE HEADERS CUT: ");
@@ -577,10 +570,9 @@ BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 			DEBUG_PRINT_STRING("ERROR DATA VALUE AFTER HEADERS CUT: ");
 			DEBUG_PRINT_VARIABLE(Word);
 			DEBUG_PRINT_STRING("\r");
-			PIC_PC_ACK = 1;
-			if (!ACK_To_PC(0xAA)) Send_Error_Word(UART_Receiver_Error);
 			Test_LED_Operation(1, FALSE); // POWER OFF COMMUNICATION OPERATION LED
 			PC_Transaction_Counter = 1;
+			Send_Error_Word(Word_Format_Error);
 			return (FALSE);
 		}
 		
@@ -923,22 +915,14 @@ BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 							}
 						break;
 					default:
-						Send_Error_Word(UART_Transaction_Error);
 						DEBUG_PRINT_STRING("UART TRANSACTION ERROR DETECTED\r");
-						PIC_PC_ACK = 1;
 						PC_Transaction_Counter = 1;
-						if (!ACK_To_PC(0xAA)) Send_Error_Word(UART_Receiver_Error);
+						Send_Error_Word(UART_Transaction_Error);
 						return (FALSE);
 						break;
 				}
 			Test_LED_Operation(1, FALSE); // POWER OFF COMMUNICATION OPERATION LED
 			PC_Transaction_Counter = 1;
-			if (!ACK_To_PC(0x55)) 
-				{
-					Send_Error_Word(UART_Receiver_Error);
-					DEBUG_PRINT_STRING("DATA2 ACK WAS SENT UNSUCCESSFULLY\r");
-				}
-			else DEBUG_PRINT_STRING("DATA2 ACK WAS SENT SUCCESSFULLY\r");
 			DEBUG_PRINT_STRING("ADDRESS WRITE TRANSACTION PARSED SUCCESSFULLY\r");
 			return (TRUE);
 		}
@@ -1078,38 +1062,30 @@ BOOL PC_Word_Parser(unsigned char Word) // RETURN "0", ERROR IN PARSING
 					case 0x2C: // Tissue temperature measurement value register
 						Tissue_Temperature_Measurement_Value_Read = TRUE;
 						break;
+					case 0x2D: // Pulser voltage domain value mesurement
+						Pulser_Voltage_Read = TRUE;
+						break;
 					default:
-						Send_Error_Word(UART_Transaction_Error);
 						DEBUG_PRINT_STRING("UART TRANSACTION ERROR DETECTED\r");
-						PIC_PC_ACK = 1;
 						PC_Transaction_Counter = 1;
-						if (!ACK_To_PC(0xAA)) Send_Error_Word(UART_Receiver_Error);
+						Send_Error_Word(UART_Transaction_Error);
 						return (FALSE);
 						break;
 				}
 			Test_LED_Operation(1, FALSE); // POWER OFF COMMUNICATION OPERATION LED
 			PC_Transaction_Counter = 1;
-			if (!ACK_To_PC(0x55)) 
-				{
-					Send_Error_Word(UART_Receiver_Error);
-					DEBUG_PRINT_STRING("ADDRESS READ ACK WAS SENT UNSUCCESSFULLY\r");
-				}
-			else DEBUG_PRINT_STRING("ADDRESS READ ACK WAS SENT SUCCESSFULLY\r");
-			
-			Delay_625US(100); // delay 65 msec
 			
 			DEBUG_PRINT_STRING("ADDRESS READ TRANSACTION PARSED SUCCESSFULLY\r");
+		//	PIC_PC_ACK = 1;
 			
 			return (TRUE);
 		}
 	else
 		{
-			Send_Error_Word(Parser_Working_Error);
 			DEBUG_PRINT_STRING("PARSER ERROR DETECTED\r");
 			Test_LED_Operation(1, FALSE); // POWER OFF COMMUNICATION OPERATION LED
-			PIC_PC_ACK = 1;
 			PC_Transaction_Counter = 1;
-			if (!ACK_To_PC(0xAA)) Send_Error_Word(UART_Receiver_Error);
+			Send_Error_Word(Parser_Working_Error);
 			return (FALSE);
 		}
 }
@@ -1123,14 +1099,36 @@ void Word_To_Byte(int Parameter) // DIVIDE ONE WORD TO TWO BYTES
 BOOL Transmitt_To_PC(int Word) 
 	{
 		char PC_Received_Word = 0;
-
-		//UART_Communication_Flag = TRUE; // FOR DEBUG ONLY
+		
+		PC_Busy_Timeout_Flag = TRUE; 
 		Word_To_Byte(Word);
 		DisableIntUART;
+		
+		PIC_PC_ACK = 1; // AVALABLE THE LINE TO LET PC START READ
+		
+		TMR5_INTFLAG = 0;
+		RESET_TIMER5;
+		Timeout_Counter = 0; // ZEROIZE TIMEOUT COUNTER VALUE
+		Timer5Enable; // ENABLE PC BUSY TIMEOUT TIMER
+		while(PC_Is_Available()) // WAIT UNTIL PC IS BUSY (READY TO READ PORT)
+			{
+				if (PC_Busy_Timeout)
+					{
+						PC_Busy_Timeout = FALSE;
+						PC_Busy_Timeout_Flag = FALSE; 
+						DEBUG_PRINT_STRING("PC DON'T READY TO GET MSB BYTE \r");
+						return (FALSE);
+					}
+			}
+		Timer5Disable; // DISABLE PC BUSY TIMEOUT TIMER
+		TMR5_INTFLAG = 0;
+		RESET_TIMER5;
+		Timeout_Counter = 0; // ZEROIZE TIMEOUT COUNTER VALUE
+		
+/////************************* SEND MSB BYTE *************************/////
+		
 		if (!Write_To_PC(MSB_Byte)) 
 			{
-				UART_Communication_Flag = FALSE; // FOR DEBUG ONLY
-			//	Timer2Enable; // ENABLE 16 SECONDS TIMER FOR VOLTAGE DOMAINS MEASUREMENT
 				DEBUG_PRINT_STRING("FAILED TO TRANSMITT DATA\r");
 				return (FALSE);
 			}
@@ -1140,63 +1138,54 @@ BOOL Transmitt_To_PC(int Word)
 				DEBUG_PRINT_VARIABLE(MSB_Byte);
 				DEBUG_PRINT_STRING(" WAS SENT\r");
 			}
-
-/**************************************** FOR DEBUG ONLY ***********************************************/
 		
-		UART_INTFLAG = 0;
-		EnableIntUART;
-		
-		/*Timeout_Counter = 0;
-		Timer2Enable;*/
-		while (!PC_Word_Detected);
-		/*	{
-				if (UART_Timeout) 
+		Timer5Enable; // ENABLE PC BUSY TIMEOUT TIMER
+		while(!PC_Is_Available())
+			{
+				if (PC_Busy_Timeout)
 					{
-						UART_Timeout = FALSE;
-						Timeout_Counter = 0;
-						UART_Communication_Flag = FALSE;
-						Timer2Enable; // ENABLE 16 SECONDS TIMER FOR VOLTAGE DOMAINS MEASUREMENT
+						PC_Busy_Timeout = FALSE;
+						PC_Busy_Timeout_Flag = FALSE; 
+						DEBUG_PRINT_STRING("PC TOO MUCH TIME BUSY WHEN RECEPT MSB BYTE \r");
 						return (FALSE);
 					}
 			}
-		Timer2Disable;
-		TMR2_INTFLAG = 0; // DISABLE TIMEOUT TIMER
-		RESET_TIMER2;
-		Timeout_Counter = 0;*/
+		Timer5Disable; // DISABLE PC BUSY TIMEOUT TIMER
+		TMR5_INTFLAG = 0;
+		RESET_TIMER5;
+		Timeout_Counter = 0; // ZEROIZE TIMEOUT COUNTER VALUE
 			
-		PC_Word_Detected = FALSE;
-		PC_Received_Word = Read_From_PC();
-		if (!Data_Receive_Error) 
+/////*****************************************************************/////
+		
+		PIC_PC_ACK = 0; // TRIGGER THE BUSY LINE TO LET PC KNOW THAT LSB SHOULD SEND
+		Delay_625US(Interrupt_Pulse_Width); // CONTROLLER TO PC BUSY SIGNAL WIDTH
+		//Delay_625US(Interrupt_Pulse_Width); 
+		PIC_PC_ACK = 1; 
+		
+/////************************* IN CASE IF PC IS STILL AVAILABLE WAIT FOR PC IS BUSY *************************/////
+
+		Timer5Enable; // ENABLE PC BUSY TIMEOUT TIMER
+		while(PC_Is_Available())
 			{
-				if (PC_Received_Word != 0x55) 
+				if (PC_Busy_Timeout)
 					{
-						UART_Communication_Flag = FALSE;
-						DEBUG_PRINT_STRING("WRONG ACK RECEIVED DURING TRANSMISSION\r");
-					//	Timer2Enable; // ENABLE 16 SECONDS TIMER FOR VOLTAGE DOMAINS MEASUREMENT
+						PC_Busy_Timeout = FALSE;
+						PC_Busy_Timeout_Flag = FALSE; 
+						DEBUG_PRINT_STRING("PC DIDN'T READY TO GET LSB BYTE\r");
 						return (FALSE);
 					}
 			}
-		else 
-			{
-				Send_Error_Word(UART_Receiver_Error);
-				UART_Communication_Flag = FALSE;
-			//	Timer2Enable; // ENABLE 16 SECONDS TIMER FOR VOLTAGE DOMAINS MEASUREMENT
-				DEBUG_PRINT_STRING("UART RECEIVE ERROR DETECTED\r");
-				return (FALSE);
-			}
+		Timer5Disable; // DISABLE PC BUSY TIMEOUT TIMER
+		TMR5_INTFLAG = 0;
+		RESET_TIMER5;
+		Timeout_Counter = 0; // ZEROIZE TIMEOUT COUNTER VALUE
 
-/*******************************************************************************************************/
-		
-		PIC_PC_ACK = 1;
-		Delay_0_625US(9); // delay 5.5 usec
-		PIC_PC_ACK = 0;
-		
-		DisableIntUART;
+/////*****************************************************************/////
+
+/////************************* SEND LSB BYTE *************************/////
 		
 		if (!Write_To_PC(LSB_Byte)) 
 			{
-				UART_Communication_Flag = FALSE; // FOR DEBUG ONLY
-			//	Timer2Enable; // ENABLE 16 SECONDS TIMER FOR VOLTAGE DOMAINS MEASUREMENT
 				DEBUG_PRINT_STRING("FAILED TO TRANSMITT DATA\r");
 				return (FALSE);
 			}
@@ -1206,70 +1195,49 @@ BOOL Transmitt_To_PC(int Word)
 				DEBUG_PRINT_VARIABLE(LSB_Byte);
 				DEBUG_PRINT_STRING(" WAS SENT\r");
 			}
-		PIC_PC_ACK = 1;
 		
-/**************************************** FOR DEBUG ONLY ***********************************************/
-
-		UART_INTFLAG = 0;
-		EnableIntUART;
-		
-		/*Timeout_Counter = 0;
-		Timer2Enable;*/
-		while (!PC_Word_Detected);
-		/*	{
-				if (UART_Timeout) 
+		Timer5Enable; // ENABLE PC BUSY TIMEOUT TIMER
+		while(!PC_Is_Available())
+			{
+				if (PC_Busy_Timeout)
 					{
-						UART_Timeout = FALSE;
-						Timeout_Counter = 0;
-						UART_Communication_Flag = FALSE;
-						Timer2Enable; // ENABLE 16 SECONDS TIMER FOR VOLTAGE DOMAINS MEASUREMENT
+						PC_Busy_Timeout = FALSE;
+						PC_Busy_Timeout_Flag = FALSE; 
+						DEBUG_PRINT_STRING("PC TOO MUCH TIME BUSY WHEN RECEPT LSB BYTE \r");
 						return (FALSE);
 					}
 			}
-		Timer2Disable;
-		TMR2_INTFLAG = 0; // DISABLE TIMEOUT TIMER
-		RESET_TIMER2;
-		Timeout_Counter = 0;*/
+		Timer5Disable; // DISABLE PC BUSY TIMEOUT TIMER
+		TMR5_INTFLAG = 0;
+		RESET_TIMER5;
+		Timeout_Counter = 0; // ZEROIZE TIMEOUT COUNTER VALUE
 		
-		PC_Word_Detected = FALSE;
-		PC_Received_Word = Read_From_PC();
-		if (!Data_Receive_Error) 
+/////*****************************************************************/////
+
+/////************************* CHECK IF PC GOT THE LSB BYTE *************************/////
+
+	/*	Timer5Enable; // ENABLE PC BUSY TIMEOUT TIMER
+		while(PC_Is_Available())
 			{
-				if (PC_Received_Word != 0x55) 
+				if (PC_Busy_Timeout)
 					{
-						UART_Communication_Flag = FALSE;
-						//Timer2Enable; // ENABLE 16 SECONDS TIMER FOR VOLTAGE DOMAINS MEASUREMENT
-						DEBUG_PRINT_STRING("WRONG ACK RECEIVED DURING TRANSMISSION\r");
+						PC_Busy_Timeout = FALSE;
+						PC_Busy_Timeout_Flag = FALSE; 
+						DEBUG_PRINT_STRING("PC DIDN'T GET THE LSB BYTE\r");
 						return (FALSE);
 					}
 			}
-		else 
-			{
-				Send_Error_Word(UART_Receiver_Error);
-				UART_Communication_Flag = FALSE;
-				//Timer2Enable; // ENABLE 16 SECONDS TIMER FOR VOLTAGE DOMAINS MEASUREMENT
-				DEBUG_PRINT_STRING("UART RECEIVE ERROR DETECTED\r");
-				return (FALSE);
-			}
+		Timer5Disable; // DISABLE PC BUSY TIMEOUT TIMER
+		TMR5_INTFLAG = 0;
+		RESET_TIMER5;
+		Timeout_Counter = 0; // ZEROIZE TIMEOUT COUNTER VALUE*/
 
-
-/*******************************************************************************************************/		
-		
+/////*****************************************************************/////			
 		EnableIntUART;
-		UART_Communication_Flag = FALSE;
-		//Timer2Enable; // ENABLE 16 SECONDS TIMER FOR VOLTAGE DOMAINS MEASUREMENT
+		PC_Busy_Timeout_Flag = FALSE;
 		DEBUG_PRINT_STRING("A WORD TRANSMITTED SUCCESSFULLY\r");
 		return (TRUE);
 	}
-
-/*int Clear_Headers_From_The_Word(int Value)
-{
-	int Cleared_Header_Word = 0;
-	Cleared_Header_Word = Value & 0x003F; 
-	Value = (Value >> 2) & 0x0FC0;
-	Cleared_Header_Word = Cleared_Header_Word | Value;
-	return (Cleared_Header_Word);
-}*/
 
 BOOL Validate_Voltage_Domains(int Domain, float Value) // VOLTAGE DOMAINS TABLE
 {
@@ -1469,6 +1437,8 @@ void main (void)
 		if (PC_Word_Detected) // CHECK FOR UART MODULE ACTIVITY
 			{
 				PC_Word_Detected = FALSE;
+				
+				Delay_625US(Interrupt_Pulse_Width); // CONTROLLER TO PC BUSY SIGNAL WIDTH
 				
 				PC_Received_Word = Read_From_PC();
 				
@@ -1745,8 +1715,8 @@ void main (void)
 						
 						if (!TEC_Power_Set(TEC_Voltage_Value))
 							{
-								Send_Error_Word(TEC_Voltage_Error);
 								DEBUG_PRINT_STRING(" UNSUCCESSFULLY\r");
+								Send_Error_Word(TEC_Voltage_Error);
 							}
 						else DEBUG_PRINT_STRING(" SUCCESSFULLY\r");
 					}
@@ -1802,10 +1772,10 @@ void main (void)
 						Amplifier_CW_Mode_Switches_Value = System_Registers_Array[40];
 						if (!Amplifier_CW_Mode_Convertion_Table(Amplifier_CW_Mode_Switches_Value)) 
 							{
-								Send_Error_Word(Amplifier_CW_Mode_Word_Error);
 								DEBUG_PRINT_STRING("AMPLIFIER CW MODE SWITCHES WAS SET TO VALUE OF: ");
 								DEBUG_PRINT_VARIABLE(Amplifier_CW_Mode_Switches_Value);
 								DEBUG_PRINT_STRING(" UNSUCCESSFULLY\r");
+								Send_Error_Word(Amplifier_CW_Mode_Word_Error);
 							}
 						else 
 							{
@@ -1822,10 +1792,10 @@ void main (void)
 						Amplifier_Pulse_Mode_Switches_Value = System_Registers_Array[41];
 						if (!Amplifier_Pulse_Mode_Convertion_Table(Amplifier_Pulse_Mode_Switches_Value)) 
 							{
-								Send_Error_Word(Amplifier_Pulse_Mode_Word_Error);
 								DEBUG_PRINT_STRING("AMPLIFIER PULSE MODE SWITCHES WAS SET TO VALUE OF: ");
 								DEBUG_PRINT_VARIABLE(Amplifier_Pulse_Mode_Switches_Value);
 								DEBUG_PRINT_STRING(" UNSUCCESSFULLY\r");
+								Send_Error_Word(Amplifier_Pulse_Mode_Word_Error);
 							}
 						else 
 							{
@@ -1845,6 +1815,7 @@ void main (void)
 								Write_To_FPGA(0x2, 0x1); // RESET FPGA ERRORS, REMOVE WHEN ERRORS REPORT WILL BE REQUIRED
 								DEBUG_PRINT_STRING("NOT SUCCEDDED\r");
 								System_Registers_Array[44] = 0;
+								System_Registers_Array[42] = System_Registers_Array[42] & 0xFFFE; // CLEAR TISSUE TEMPRERATURE MEASURE BIT
 							}
 						else 
 							{
@@ -1852,6 +1823,7 @@ void main (void)
 								System_Registers_Array[44] = 0;
 								System_Registers_Array[44] = (System_Registers_Array[44] | Read_From_FPGA(0x7)) << 8; // READ MSB VALUE
 								System_Registers_Array[44] = (System_Registers_Array[44] | (Read_From_FPGA(0x5) & (0x00FF))); // READ LSB VALUE
+								System_Registers_Array[42] = System_Registers_Array[42] & 0xFFFE; // CLEAR TISSUE TEMPRERATURE MEASURE BIT
 								DEBUG_PRINT_STRING("THE TISSUE TEMPERATURE VALUE IS: ");
 								DEBUG_PRINT_VARIABLE(System_Registers_Array[44]);
 								DEBUG_PRINT_STRING("\r");
@@ -1865,16 +1837,15 @@ void main (void)
 						Error2_Register = 0; // ZEROIZE ERROR2 REGISTER	
 						System_Registers_Array[36] = 0; // ZEROIZE ERROR1 REGISTER
 						System_Registers_Array[39] = 0; // ZEROIZE ERROR2 REGISTER	
-						System_Registers_Array[42] = 0xFFC1; // ZEROIZE RELEVANT BITS AT FPGA CONTROL REGISTER
+						System_Registers_Array[42] = 0xFFC; // ZEROIZE RELEVANT BITS AT FPGA CONTROL REGISTER
 						Write_To_FPGA(0x2, 0x1); // RESET FPGA ERRORS
 						System_Registers_Array[43] = 0xFFFE; // CLEAR RESET ALL ERRORS BIT
 						Test_LED_Operation(2, FALSE);
 						DEBUG_PRINT_STRING("ERROR RESET PROCCESS COMPLETED");
 					}
 				
-				Interrupt_Signal_Strobe();
-				if (!ACK_To_PC(0x55)) Send_Error_Word(UART_Receiver_Error);
 				PIC_PC_ACK = 1;
+				Command_Completion_Interrupt_Strobe();
 			}
 			
 		if (Power_Control_Register_Read) // ALL READ ONLY BITS SHOULD BE READ FROM FPGA, WHEN FPGA WILL BE BUILT, SHOULD BE COMPLETED
@@ -1985,8 +1956,8 @@ void main (void)
 					}
 				else 
 					{
-						Send_Error_Word(DDS1_Frequency_Error);
 						DEBUG_PRINT_STRING("DDS1 FREQUENCY ERROR DETECTED");
+						Send_Error_Word(DDS1_Frequency_Error);
 					}
 			}
 			
@@ -2080,8 +2051,8 @@ void main (void)
 					}
 				else 
 					{
-						Send_Error_Word(DDS2_Frequency_Error);
 						DEBUG_PRINT_STRING("DDS2 FREQUENCY ERROR DETECTED");
+						Send_Error_Word(DDS2_Frequency_Error);
 					}
 			}
 			
@@ -2378,8 +2349,8 @@ void main (void)
 		if (FPGA_Interrupt_Flag)
 			{
 				FPGA_Interrupt_Flag = FALSE;
+				Delay_625US(Interrupt_Pulse_Width); // CONTROLLER TO PC PULSE HIGH WIDTH
 				FPGA_Interrupt_Parsing();
-				Interrupt_Signal_Strobe();
 				DEBUG_PRINT_STRING("FPGA INTERRUPTS PARSED SUCCESSFULLY\r");
 				Main_Interrupt_Detection_Enable;	
 			}
@@ -2394,6 +2365,15 @@ void main (void)
 						DEBUG_PRINT_VARIABLE(System_Registers_Array[44]);
 						DEBUG_PRINT_STRING("\r");
 					}					
+			}
+			
+		if (Pulser_Voltage_Read)
+			{
+				Pulser_Voltage_Read = FALSE;
+				Voltage_Domain_Read(P150V, P150V_Resistor_Divider);
+				DEBUG_PRINT_STRING("PULSER VOTAGE DOMAIN RETURN VALUE IS: ");
+				DEBUG_PRINT_VARIABLE(A2D_Calculated_Value * 1000);
+				DEBUG_PRINT_STRING("\r");		
 			}
 	}
 	

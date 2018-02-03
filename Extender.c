@@ -95,6 +95,9 @@ char Interrupt_Triggered_Device(char Extender_Number, char Extender_Port_Number)
 
 void Extender_Init(char Extender_Number) 
 {
+
+	char Tmp = 0;
+
 	Write_To_Extender(Extender_Number, 0x0A, 0x2A); // SEQUENTAL PORT NUMBERING; INTERRUPTS ARE SEPARATED, NOT OPEN DRAIN AND ACTIVE HIGH; ADDRESS PINS ENABLED
 	Write_To_Extender(Extender_Number, 0x0B, 0x2A); // SEQUENTAL PORT NUMBERING; INTERRUPTS ARE SEPARATED, NOT OPEN DRAIN AND ACTIVE HIGH; ADDRESS PINS ENABLED	
 	
@@ -124,11 +127,12 @@ void Extender_Init(char Extender_Number)
 				Write_To_Extender(Extender_Number, 0x03, 0x02); // DON'T INVERT INPUTS, OUTSIDE GPB1
 				Extender_Interrupt_Clear(Extender_Number);
 				Write_To_Extender(Extender_Number, 0x04, 0xFF); // ENABLE FOR INTERRUPT AT CHANGE 
-				Write_To_Extender(Extender_Number, 0x05, 0xFF); // ENABLE FOR INTERRUPT AT CHANGE
+				Write_To_Extender(Extender_Number, 0x05, 0x00); // ENABLE FOR INTERRUPT AT CHANGE, OUTSIDE PORT GPB7, GPB6, GPB5, GPB4
 				Write_To_Extender(Extender_Number, 0x08, 0x00); // INTERRUPT OCCURS, WHEN CURRENT VALUE IS DIFFERENT FROM THE PREVIOUS VALUE
 				Write_To_Extender(Extender_Number, 0x09, 0x00); // INTERRUPT OCCURS, WHEN CURRENT VALUE IS DIFFERENT FROM THE PREVIOUS VALUE
 				Write_To_Extender(Extender_Number, 0x0C, 0xFF); // PULL UP, ARE ENABLED FOR ALL PORTS
 				Write_To_Extender(Extender_Number, 0x0D, 0xFF); // PULL UP, ARE ENABLED FOR ALL PORTS
+				//Extender_Interrupt_Clear(Extender_Number);
 				break;
 			case Expander_C_SPI: 
 				Write_To_Extender(Extender_Number, 0x00, 0x00); // ALL PORT ARE OUTPUTS
@@ -157,12 +161,16 @@ void Extender_Init(char Extender_Number)
 				Write_To_Extender(Extender_Number, 0x01, 0xF9); // ALL PORT ARE INPUTS, OUTSIDE PORT GPB1, GPB2
 				Write_To_Extender(Extender_Number, 0x02, 0x00); // DON'T INVERT INPUTS
 				Write_To_Extender(Extender_Number, 0x03, 0x00); // DON'T INVERT INPUTS
-				Write_To_Extender(Extender_Number, 0x04, 0x4F); // ENABLE FOR INTERRUPT AT CHANGE, OUTSIDE PORT GPA5, GPA7, GPA4
+				Write_To_Extender(Extender_Number, 0x04, 0x0F); // ENABLE FOR INTERRUPT AT CHANGE, OUTSIDE PORT GPA7, GPA6, GPA5, GPA4
 				Write_To_Extender(Extender_Number, 0x05, 0xF9); // ENABLE FOR INTERRUPT AT CHANGE, OUTSIDE PORT GPB1, GPB2
 				Write_To_Extender(Extender_Number, 0x08, 0x00); // INTERRUPT OCCURS, WHEN CURRENT VALUE IS DIFFERENT FROM THE PREVIOUS VALUE
 				Write_To_Extender(Extender_Number, 0x09, 0x00); // INTERRUPT OCCURS, WHEN CURRENT VALUE IS DIFFERENT FROM THE PREVIOUS VALUE
 				Write_To_Extender(Extender_Number, 0x0C, 0xCF); // PULL UP, ARE ENABLED FOR ALL PORTS, OUTSIDE PORT GPA5, GPA4
 				Write_To_Extender(Extender_Number, 0x0D, 0xF9); // PULL UP, ARE ENABLED FOR ALL PORTS, OUTSIDE PORT GPB1, GPB2
+				Write_To_Extender(Extender_Number, 0x12, 0xCF); // CONFIGURE FPGA RESET AND PULSER CONTROL SIGNAL TO "0"
+				Write_To_Extender(Extender_Number, 0x13, 0xF9); // CONFIGURE AMPLIFIER SWITCHES CONTROL SIGNALS TO "0"
+				Write_To_Extender(Extender_Number, 0x14, 0xCF); // CONFIGURE FPGA RESET AND PULSER CONTROL SIGNAL TO "0"
+				Write_To_Extender(Extender_Number, 0x15, 0xF9); // CONFIGURE AMPLIFIER SWITCHES CONTROL SIGNALS TO "0"
 				Extender_Interrupt_Clear(Extender_Number);
 				break;
 		}

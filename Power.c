@@ -89,7 +89,7 @@ BOOL Domains_Power_Control(char Domain, BOOL Off_On) // POWER ON AND OFF MAIN DO
 				Tmp = Read_From_Extender(Expander_D_SPI, 0x12); // READ PORT STATUS FROM EXPANDER D
 				if (!Off_On) Write_To_Extender(Expander_D_SPI, 0x12, Tmp | 0x02); // SET RELEVANT BIT
 				else Write_To_Extender(Expander_D_SPI, 0x12, Tmp & 0xFD); // CLEAR RELEVANT BIT
-				Delay_62_5US(240); // delay 15 msec
+				Delay_62_5US(1120); // delay 70 msec, due to 12v_dds fail signal falls to "0" during 50 msec when 12v dds disable
 				Extender_Interrupt_Clear(Expander_B_SPI);
 				Write_To_Extender(Expander_B_SPI, 0x04, 0xFF); // ENABLE ALL INTERRUPTS
 				return(TRUE);
